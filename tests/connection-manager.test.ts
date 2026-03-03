@@ -53,7 +53,7 @@ function createMockConfig(overrides?: Partial<Config>): Config {
     },
     vector_store: {
       provider: "chromadb",
-      persist_directory: "./data/chromadb",
+      persist_directory: "http://localhost:8000",
       collection_prefix: "meshimize",
       distance_metric: "cosine",
       stale_days: 7,

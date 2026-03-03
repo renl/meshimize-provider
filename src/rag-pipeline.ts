@@ -49,6 +49,7 @@ export interface LoadedDocument {
 
 const SKIP_DIRS = new Set(["node_modules", ".git", "vendor", "_build"]);
 const ERB_TAG_REGEX = /<%[=#-]?.*?-?%>/gs;
+const CHROMADB_ADD_BATCH_SIZE = 500;
 
 // ─── Helpers ───
 
@@ -135,6 +136,17 @@ export class RagPipeline {
   private client: ChromaClient;
 
   constructor(private readonly options: RagPipelineOptions) {
+    // Validate persistDirectory is an HTTP(S) URL (ChromaDB JS client requires a server URL)
+    try {
+      const url = new URL(options.persistDirectory);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("not HTTP(S)");
+      }
+    } catch {
+      throw new Error(
+        `persistDirectory must be a valid HTTP(S) URL (e.g., http://localhost:8000), got: "${options.persistDirectory}"`,
+      );
+    }
     this.client = new ChromaClient({
       path: options.persistDirectory,
     });
@@ -297,12 +309,19 @@ export class RagPipeline {
     const metadatas = allChunks.map((c) => ({ source: c.source }));
     const documents = allChunks.map((c) => c.text);
 
-    await collection.add({
-      ids,
-      embeddings,
-      metadatas,
-      documents,
-    });
+    for (let i = 0; i < ids.length; i += CHROMADB_ADD_BATCH_SIZE) {
+      const end = Math.min(i + CHROMADB_ADD_BATCH_SIZE, ids.length);
+      await collection.add({
+        ids: ids.slice(i, end),
+        embeddings: embeddings.slice(i, end),
+        metadatas: metadatas.slice(i, end),
+        documents: documents.slice(i, end),
+      });
+      this.options.logger.debug(
+        { batch: Math.floor(i / CHROMADB_ADD_BATCH_SIZE) + 1, chunks: end - i },
+        "Added batch to ChromaDB",
+      );
+    }
 
     const durationMs = Date.now() - startTime;
     this.options.logger.info(
@@ -403,7 +422,7 @@ export class RagPipeline {
         chunks.push({
           content: documents[i] ?? "",
           source: (metadatas[i]?.source as string) ?? "unknown",
-          score: distances[i] != null ? 1 - (distances[i] as number) : 0,
+          score: distances[i] != null ? (distances[i] as number) : 0,
         });
       }
     }

@@ -41,7 +41,8 @@ const EmbeddingSchema = z.object({
 
 const VectorStoreSchema = z.object({
   provider: z.literal("chromadb").default("chromadb"),
-  persist_directory: z.string().default("./data/chromadb"),
+  /** ChromaDB server URL (e.g., http://localhost:8000). Must be a valid HTTP(S) URL. */
+  persist_directory: z.string().url().default("http://localhost:8000"),
   collection_prefix: z.string().default("meshimize"),
   distance_metric: z.enum(["cosine", "l2", "ip"]).default("cosine"),
   stale_days: z.number().int().min(1).default(7),

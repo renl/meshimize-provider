@@ -328,10 +328,11 @@ describe("rag-pipeline", () => {
     expect(chunks).toHaveLength(2);
     expect(chunks[0].content).toBe("Document content 1");
     expect(chunks[0].source).toBe("file1.md");
-    expect(chunks[0].score).toBeCloseTo(0.9, 1);
+    // Raw distance value from ChromaDB (lower = more similar)
+    expect(chunks[0].score).toBeCloseTo(0.1, 5);
     expect(chunks[1].content).toBe("Document content 2");
     expect(chunks[1].source).toBe("file2.md");
-    expect(chunks[1].score).toBeCloseTo(0.7, 1);
+    expect(chunks[1].score).toBeCloseTo(0.3, 5);
   });
 
   // ─── needsIngestion ───
@@ -400,29 +401,47 @@ describe("rag-pipeline", () => {
     writeFileSync(join(tempDir, "doc2.md"), "# Doc 2\n\nParagraph two content.");
     writeFileSync(join(tempDir, "doc3.md"), "# Doc 3\n\nParagraph three content.");
 
-    const pipeline = new RagPipeline(
-      createTestOptions({
-        batchSize: 1,
-        requestsPerMinute: 60, // 1 per second = 1000ms between batches
-      }),
-    );
-    const group = createTestGroup(tempDir, {
-      chunk_size: 5000,
-      chunk_overlap: 0,
-    });
+    // Track sleep calls to verify rate limiting without real delays
+    const sleepCalls: number[] = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((fn: TimerHandler, ms?: number) => {
+        if (typeof fn === "function" && ms && ms > 0) {
+          sleepCalls.push(ms);
+        }
+        // Resolve immediately to keep the test fast
+        return originalSetTimeout(fn as () => void, 0);
+      });
 
-    const startTime = Date.now();
-    await pipeline.ingest(group);
-    const elapsed = Date.now() - startTime;
+    try {
+      const pipeline = new RagPipeline(
+        createTestOptions({
+          batchSize: 1,
+          requestsPerMinute: 60, // 1 per second = 1000ms between batches
+        }),
+      );
+      const group = createTestGroup(tempDir, {
+        chunk_size: 5000,
+        chunk_overlap: 0,
+      });
 
-    // With batchSize=1 and 3 docs, at least 3 embedding calls
-    // Between batches (except last): sleep ~1000ms each
-    // At least 2 sleeps → ~2000ms total
-    const callCount = mockEmbedDocuments.mock.calls.length;
-    expect(callCount).toBeGreaterThanOrEqual(3);
+      await pipeline.ingest(group);
 
-    // Verify there was meaningful delay from rate limiting
-    expect(elapsed).toBeGreaterThanOrEqual(500);
+      // With batchSize=1 and 3 docs, at least 3 embedding calls
+      const callCount = mockEmbedDocuments.mock.calls.length;
+      expect(callCount).toBeGreaterThanOrEqual(3);
+
+      // Rate-limit sleeps should have been called between batches (not after the last one)
+      expect(sleepCalls.length).toBeGreaterThanOrEqual(2);
+      // Each sleep should be ~1000ms (60_000 / 60 rpm)
+      for (const ms of sleepCalls) {
+        expect(ms).toBeGreaterThanOrEqual(900);
+        expect(ms).toBeLessThanOrEqual(1100);
+      }
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   // ─── stripErbTags ───

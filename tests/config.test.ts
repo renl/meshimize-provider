@@ -134,7 +134,7 @@ describe("config", () => {
 
     // Vector store defaults
     expect(config.vector_store.provider).toBe("chromadb");
-    expect(config.vector_store.persist_directory).toBe("./data/chromadb");
+    expect(config.vector_store.persist_directory).toBe("http://localhost:8000");
     expect(config.vector_store.distance_metric).toBe("cosine");
 
     // Group defaults
