@@ -1,6 +1,7 @@
 import { loadConfig, type Config } from "./config.js";
 import { createLogger } from "./logger.js";
 import { startHealthServer } from "./health-server.js";
+import { LifecycleManager } from "./lifecycle-manager.js";
 import type { HealthResponse } from "./types.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -40,9 +41,12 @@ async function main(): Promise<void> {
   // Track startup time for uptime calculation
   const startTime = Date.now();
 
+  // Create lifecycle manager
+  const lifecycleManager = new LifecycleManager({ config, logger, version });
+
   // Health response builder
   const getHealth = (): HealthResponse => ({
-    status: "starting",
+    status: lifecycleManager.getConnectionState() === "connected" ? "healthy" : "starting",
     version,
     uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
     groups: config.groups.map((g) => ({
@@ -52,12 +56,20 @@ async function main(): Promise<void> {
       queue_depth: 0,
       answered_count: 0,
     })),
-    connection: "disconnected",
+    connection: lifecycleManager.getConnectionState(),
   });
 
   // Start health server
   const healthServer = await startHealthServer(config.agent.health_port, getHealth);
   logger.info({ port: config.agent.health_port }, "Health server started");
+
+  // Start lifecycle manager (connect + join groups)
+  try {
+    await lifecycleManager.start();
+    logger.info("meshimize-provider ready (Slice 3 — connection manager active)");
+  } catch (err) {
+    logger.error({ err }, "Failed to start lifecycle manager — running in degraded mode");
+  }
 
   // Graceful shutdown (idempotent)
   let shuttingDown = false;
@@ -65,10 +77,20 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info("Shutting down...");
-    healthServer.close(() => {
-      logger.info("Health server closed");
-      process.exit(0);
-    });
+
+    // Disconnect lifecycle manager first, then close health server
+    lifecycleManager
+      .shutdown()
+      .catch((err) => {
+        logger.error({ err }, "Error during lifecycle manager shutdown");
+      })
+      .finally(() => {
+        healthServer.close(() => {
+          logger.info("Health server closed");
+          process.exit(0);
+        });
+      });
+
     // Force exit after timeout
     setTimeout(() => {
       logger.warn("Shutdown timeout — forcing exit");
@@ -78,8 +100,6 @@ async function main(): Promise<void> {
 
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
-
-  logger.info("meshimize-provider ready (Slice 2 — config + health only)");
 }
 
 main().catch((err) => {
