@@ -1,0 +1,47 @@
+# Meshimize Seed Provider Agent — Configuration
+# Env vars override values here (see src/config.ts for env var mapping).
+
+meshimize:
+  server_url: "https://api.meshimize.com"
+  api_key: "YOUR_MESHIMIZE_API_KEY" # Override: MESHIMIZE_API_KEY
+  ws_path: "/socket/websocket"
+
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  api_key: "YOUR_OPENAI_API_KEY" # Override: LLM_API_KEY
+  max_tokens: 1000
+  temperature: 0.3
+
+embedding:
+  provider: "openai"
+  model: "text-embedding-3-small"
+  api_key: "YOUR_OPENAI_API_KEY" # Override: EMBEDDING_API_KEY
+  dimensions: 1536
+  batch_size: 500
+  requests_per_minute: 3000
+
+vector_store:
+  provider: "chromadb"
+  persist_directory: "./data/chromadb"
+  collection_prefix: "meshimize"
+  distance_metric: "cosine"
+  stale_days: 7
+
+agent:
+  queue_max_depth: 50
+  reconnect_delays_ms: [1000, 2000, 5000, 10000, 30000]
+  health_port: 8080
+  health_summary_interval_s: 300
+  shutdown_timeout_ms: 10000
+  log_level: "info"
+
+groups:
+  - group_id: "00000000-0000-0000-0000-000000000001"
+    group_name: "Fly.io Docs"
+    slug: "fly-docs"
+    docs_path: "./docs-source/fly-docs"
+    chunk_size: 1000
+    chunk_overlap: 200
+    top_k: 5
+    max_concurrency: 2
