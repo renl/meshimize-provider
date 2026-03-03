@@ -20,7 +20,7 @@ import type { IncomingQuestion, ConnectionState } from "./types.js";
 
 // ─── Phoenix Wire Protocol Types ───
 
-/** Phoenix v1 wire format: [join_ref, ref, topic, event, payload] */
+/** Phoenix v2 wire format: [join_ref, ref, topic, event, payload] */
 type PhoenixMessage = [string | null, string | null, string, string, unknown];
 
 interface PhoenixReplyPayload {
@@ -254,39 +254,48 @@ export class ConnectionManager {
     const joinPayload = { api_key: this.config.meshimize.api_key };
     this.sendMessage([joinRef, ref, topic, "phx_join", joinPayload]);
 
-    // Wait for join reply
-    await new Promise<void>((resolve, reject) => {
-      this.pendingJoins.set(ref, { resolve, reject });
+    // Wait for join reply — clean up channel entry on failure
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.pendingJoins.set(ref, { resolve, reject });
 
-      // Timeout after 10 seconds
-      const timeout = setTimeout(() => {
-        this.pendingJoins.delete(ref);
-        reject(new Error(`Join timeout for channel ${topic}`));
-      }, 10000);
+        // Timeout after 10 seconds
+        const timeout = setTimeout(() => {
+          this.pendingJoins.delete(ref);
+          reject(new Error(`Join timeout for channel ${topic}`));
+        }, 10000);
 
-      // Store the timeout so we can clear it on success/error
-      const original = this.pendingJoins.get(ref);
-      if (original) {
-        this.pendingJoins.set(ref, {
-          resolve: () => {
-            clearTimeout(timeout);
-            original.resolve();
-          },
-          reject: (err: Error) => {
-            clearTimeout(timeout);
-            original.reject(err);
-          },
-        });
-      }
-    });
+        // Store the timeout so we can clear it on success/error
+        const original = this.pendingJoins.get(ref);
+        if (original) {
+          this.pendingJoins.set(ref, {
+            resolve: () => {
+              clearTimeout(timeout);
+              original.resolve();
+            },
+            reject: (err: Error) => {
+              clearTimeout(timeout);
+              original.reject(err);
+            },
+          });
+        }
+      });
 
-    channelState.joined = true;
-    this.logger.info({ topic, groupName: group.group_name }, "Channel joined successfully");
+      channelState.joined = true;
+      this.logger.info({ topic, groupName: group.group_name }, "Channel joined successfully");
 
-    // Role verification (non-blocking)
-    this.verifyRole(group).catch((err) => {
-      this.logger.warn({ err, groupId: group.group_id }, "Role verification failed (non-blocking)");
-    });
+      // Role verification (non-blocking)
+      this.verifyRole(group).catch((err) => {
+        this.logger.warn(
+          { err, groupId: group.group_id },
+          "Role verification failed (non-blocking)",
+        );
+      });
+    } catch (err) {
+      // Remove stale channel entry on join failure
+      this.channels.delete(topic);
+      throw err;
+    }
   }
 
   /** Leave all channels and disconnect */
@@ -467,6 +476,12 @@ export class ConnectionManager {
     for (const channel of this.channels.values()) {
       channel.joined = false;
     }
+
+    // Reject all pending joins so callers don't hang
+    for (const pending of this.pendingJoins.values()) {
+      pending.reject(new Error("Socket disconnected"));
+    }
+    this.pendingJoins.clear();
 
     this.setState("disconnected");
 

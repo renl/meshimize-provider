@@ -41,6 +41,9 @@ async function main(): Promise<void> {
   // Track startup time for uptime calculation
   const startTime = Date.now();
 
+  // Track whether startup was attempted (to distinguish "starting" from "failed")
+  let startAttempted = false;
+
   // Create lifecycle manager
   const lifecycleManager = new LifecycleManager({ config, logger, version });
 
@@ -51,6 +54,8 @@ async function main(): Promise<void> {
     if (connState === "connected") {
       status = "healthy";
     } else if (lifecycleManager.isStarted()) {
+      status = "degraded";
+    } else if (startAttempted) {
       status = "degraded";
     } else {
       status = "starting";
@@ -77,6 +82,7 @@ async function main(): Promise<void> {
 
   // Start lifecycle manager (connect + join groups)
   try {
+    startAttempted = true;
     await lifecycleManager.start();
     logger.info("meshimize-provider ready (Slice 3 — connection manager active)");
   } catch (err) {

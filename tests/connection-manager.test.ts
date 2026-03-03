@@ -604,6 +604,71 @@ describe("ConnectionManager", () => {
     await expect(joinPromise).rejects.toThrow("Channel join failed");
   });
 
+  it("should remove channel entry on join failure (stale channel cleanup)", async () => {
+    const { cm, mockWs, questions } = createConnectionManager();
+
+    const connectPromise = cm.connect();
+    await new Promise((r) => setTimeout(r, 0));
+    mockWs.simulateOpen();
+    await connectPromise;
+
+    const group = createMockGroupConfig();
+    const joinPromise = cm.joinGroup(group);
+
+    // Simulate error join reply
+    const joinMsg = JSON.parse(mockWs.sentMessages[0]) as unknown[];
+    mockWs.simulateMessage([
+      joinMsg[0],
+      joinMsg[1],
+      `group:${group.group_id}`,
+      "phx_reply",
+      { status: "error", response: { reason: "unauthorized" } },
+    ]);
+
+    await expect(joinPromise).rejects.toThrow("Channel join failed");
+
+    // Simulate a new_message on the failed topic — should NOT trigger onQuestion
+    mockWs.simulateMessage([
+      null,
+      null,
+      `group:${group.group_id}`,
+      "new_message",
+      {
+        message_id: "msg-stale",
+        group_id: group.group_id,
+        sender_id: "user-999",
+        sender_name: "Eve",
+        content: "Should not be received",
+        message_type: "question",
+        inserted_at: "2026-03-03T10:00:00Z",
+        parent_message_id: null,
+      },
+    ]);
+
+    expect(questions).toHaveLength(0);
+  });
+
+  it("should reject pending joins on unexpected disconnect", async () => {
+    vi.useFakeTimers();
+
+    const { cm, mockWs } = createConnectionManager();
+
+    const connectPromise = cm.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    mockWs.simulateOpen();
+    await connectPromise;
+
+    const group = createMockGroupConfig();
+    const joinPromise = cm.joinGroup(group);
+
+    // Before the join reply comes back, simulate disconnect
+    mockWs.simulateClose();
+
+    await expect(joinPromise).rejects.toThrow("Socket disconnected");
+
+    vi.useRealTimers();
+  });
+
   it("should reset state to disconnected when auth fails", async () => {
     const mockWs = new MockWebSocket();
     const stateChanges: ConnectionState[] = [];
