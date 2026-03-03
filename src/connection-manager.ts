@@ -170,7 +170,7 @@ export class ConnectionManager {
       const wsProtocol = serverUrl.startsWith("https://") ? "wss://" : "ws://";
       const hostAndPath = serverUrl.replace(/^https?:\/\//, "");
       const wsPath = this.config.meshimize.ws_path;
-      const wsUrl = `${wsProtocol}${hostAndPath}${wsPath}?token=${this.token}&vsn=2.0.0`;
+      const wsUrl = `${wsProtocol}${hostAndPath}${wsPath}?token=${encodeURIComponent(this.token!)}&vsn=2.0.0`;
 
       this.logger.debug(
         { wsUrl: wsUrl.replace(/token=[^&]+/, "token=[REDACTED]") },

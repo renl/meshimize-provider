@@ -82,10 +82,11 @@ async function main(): Promise<void> {
 
   // Start lifecycle manager (connect + join groups)
   try {
-    startAttempted = true;
     await lifecycleManager.start();
+    startAttempted = true;
     logger.info("meshimize-provider ready (Slice 3 — connection manager active)");
   } catch (err) {
+    startAttempted = true;
     logger.error({ err }, "Failed to start lifecycle manager — running in degraded mode");
   }
 
