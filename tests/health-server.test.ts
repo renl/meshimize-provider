@@ -37,14 +37,7 @@ function degradedResponse(): HealthResponse {
 async function startAndGetPort(
   getHealth: () => HealthResponse,
 ): Promise<{ server: Server; port: number }> {
-  const srv = startHealthServer(0, getHealth);
-  await new Promise<void>((resolve) => {
-    if (srv.listening) {
-      resolve();
-    } else {
-      srv.once("listening", resolve);
-    }
-  });
+  const srv = await startHealthServer(0, getHealth);
   const addr = srv.address() as AddressInfo;
   return { server: srv, port: addr.port };
 }

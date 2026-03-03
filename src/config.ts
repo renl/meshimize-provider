@@ -111,11 +111,15 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
 
 export function loadConfig(configPath: string): Config {
   const raw = readFileSync(configPath, "utf-8");
-  const parsed = parseYaml(raw) as Record<string, unknown>;
+  const parsed = parseYaml(raw);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid configuration file: root YAML value must be a mapping/object.");
+  }
+  const configObject = parsed as Record<string, unknown>;
 
   // Apply env var overrides (highest priority)
-  applyEnvOverrides(parsed);
+  applyEnvOverrides(configObject);
 
   // Validate with Zod
-  return ConfigSchema.parse(parsed);
+  return ConfigSchema.parse(configObject);
 }

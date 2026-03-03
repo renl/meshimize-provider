@@ -1,5 +1,5 @@
 # Meshimize Seed Provider Agent — Configuration
-# Env vars override values here (see docs for mapping).
+# Env vars override values here (see src/config.ts for env var mapping).
 
 meshimize:
   server_url: "https://api.meshimize.com"

@@ -1,4 +1,4 @@
-import { loadConfig } from "./config.js";
+import { loadConfig, type Config } from "./config.js";
 import { createLogger } from "./logger.js";
 import { startHealthServer } from "./health-server.js";
 import type { HealthResponse } from "./types.js";
@@ -20,10 +20,12 @@ function getVersion(): string {
 
 async function main(): Promise<void> {
   const version = getVersion();
-  const configPath = process.argv[2] || "config/meshimize-provider.yaml";
+  const cliArgs = process.argv.slice(2);
+  const configPath =
+    cliArgs.find((arg) => !arg.startsWith("-")) || "config/meshimize-provider.yaml";
 
   // Load and validate configuration
-  let config;
+  let config: Config;
   try {
     config = loadConfig(configPath);
   } catch (err) {
@@ -54,11 +56,14 @@ async function main(): Promise<void> {
   });
 
   // Start health server
-  const healthServer = startHealthServer(config.agent.health_port, getHealth);
+  const healthServer = await startHealthServer(config.agent.health_port, getHealth);
   logger.info({ port: config.agent.health_port }, "Health server started");
 
-  // Graceful shutdown
+  // Graceful shutdown (idempotent)
+  let shuttingDown = false;
   const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info("Shutting down...");
     healthServer.close(() => {
       logger.info("Health server closed");
@@ -71,8 +76,8 @@ async function main(): Promise<void> {
     }, config.agent.shutdown_timeout_ms);
   };
 
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 
   logger.info("meshimize-provider ready (Slice 2 — config + health only)");
 }

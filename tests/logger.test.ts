@@ -20,36 +20,9 @@ describe("logger", () => {
 
     const dest = pino.destination({ dest: logFile, sync: true });
     try {
-      const logger = createLogger("info");
+      const logger = createLogger("info", dest);
 
-      // Create a child logger that writes to the file destination
-      const testLogger = pino(
-        {
-          level: "info",
-          redact: {
-            paths: [
-              "config.meshimize.api_key",
-              "config.meshimize.apiKey",
-              "config.llm.api_key",
-              "config.llm.apiKey",
-              "config.embedding.api_key",
-              "config.embedding.apiKey",
-              "apiKey",
-              "api_key",
-              "token",
-              "authorization",
-            ],
-            censor: "[REDACTED]",
-          },
-          formatters: {
-            level: (label) => ({ level: label }),
-          },
-          timestamp: pino.stdTimeFunctions.isoTime,
-        },
-        dest,
-      );
-
-      testLogger.info({ api_key: "super-secret-key" }, "test message");
+      logger.info({ api_key: "super-secret-key" }, "test message");
       dest.flushSync();
 
       const output = readFileSync(logFile, "utf-8");
@@ -57,9 +30,6 @@ describe("logger", () => {
 
       expect(parsed.api_key).toBe("[REDACTED]");
       expect(output).not.toContain("super-secret-key");
-
-      // Verify the main logger was created with correct level
-      expect(logger.level).toBe("info");
     } finally {
       dest.destroy();
       // Allow file handle to fully release on Windows
@@ -74,18 +44,9 @@ describe("logger", () => {
 
     const dest = pino.destination({ dest: logFile, sync: true });
     try {
-      const testLogger = pino(
-        {
-          level: "info",
-          formatters: {
-            level: (label) => ({ level: label }),
-          },
-          timestamp: pino.stdTimeFunctions.isoTime,
-        },
-        dest,
-      );
+      const logger = createLogger("info", dest);
 
-      testLogger.info("timestamp test");
+      logger.info("timestamp test");
       dest.flushSync();
 
       const output = readFileSync(logFile, "utf-8");
@@ -108,18 +69,9 @@ describe("logger", () => {
 
     const dest = pino.destination({ dest: logFile, sync: true });
     try {
-      const testLogger = pino(
-        {
-          level: "info",
-          formatters: {
-            level: (label) => ({ level: label }),
-          },
-          timestamp: pino.stdTimeFunctions.isoTime,
-        },
-        dest,
-      );
+      const logger = createLogger("info", dest);
 
-      testLogger.info("level format test");
+      logger.info("level format test");
       dest.flushSync();
 
       const output = readFileSync(logFile, "utf-8");

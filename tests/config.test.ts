@@ -17,6 +17,12 @@ function writeYamlConfig(dir: string, config: Record<string, unknown>): string {
   return filePath;
 }
 
+function writeRawYaml(dir: string, content: string): string {
+  const filePath = join(dir, "test-config.yaml");
+  writeFileSync(filePath, content, "utf-8");
+  return filePath;
+}
+
 function validConfig(): Record<string, unknown> {
   return {
     meshimize: {
@@ -199,5 +205,35 @@ describe("config", () => {
     const configPath = writeYamlConfig(tempDir, cfg);
 
     expect(() => loadConfig(configPath)).toThrow();
+  });
+
+  // ─── YAML guard tests (Fix #3) ───
+
+  it("should throw when YAML file is empty (null root)", () => {
+    const configPath = writeRawYaml(tempDir, "");
+    expect(() => loadConfig(configPath)).toThrow(
+      "Invalid configuration file: root YAML value must be a mapping/object.",
+    );
+  });
+
+  it("should throw when YAML root is a scalar string", () => {
+    const configPath = writeRawYaml(tempDir, "just a string\n");
+    expect(() => loadConfig(configPath)).toThrow(
+      "Invalid configuration file: root YAML value must be a mapping/object.",
+    );
+  });
+
+  it("should throw when YAML root is an array", () => {
+    const configPath = writeRawYaml(tempDir, "- item1\n- item2\n");
+    expect(() => loadConfig(configPath)).toThrow(
+      "Invalid configuration file: root YAML value must be a mapping/object.",
+    );
+  });
+
+  it("should throw when YAML root is a number", () => {
+    const configPath = writeRawYaml(tempDir, "42\n");
+    expect(() => loadConfig(configPath)).toThrow(
+      "Invalid configuration file: root YAML value must be a mapping/object.",
+    );
   });
 });

@@ -1,7 +1,8 @@
 import pino from "pino";
+import type { LevelWithSilent, DestinationStream } from "pino";
 
-export function createLogger(level: string): pino.Logger {
-  return pino({
+export function createLogger(level: LevelWithSilent, destination?: DestinationStream): pino.Logger {
+  const opts: pino.LoggerOptions = {
     level,
     redact: {
       paths: [
@@ -22,5 +23,6 @@ export function createLogger(level: string): pino.Logger {
       level: (label) => ({ level: label }),
     },
     timestamp: pino.stdTimeFunctions.isoTime,
-  });
+  };
+  return destination ? pino(opts, destination) : pino(opts);
 }
