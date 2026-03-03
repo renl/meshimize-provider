@@ -45,19 +45,31 @@ async function main(): Promise<void> {
   const lifecycleManager = new LifecycleManager({ config, logger, version });
 
   // Health response builder
-  const getHealth = (): HealthResponse => ({
-    status: lifecycleManager.getConnectionState() === "connected" ? "healthy" : "starting",
-    version,
-    uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
-    groups: config.groups.map((g) => ({
-      group_id: g.group_id,
-      group_name: g.group_name,
-      status: "initializing",
-      queue_depth: 0,
-      answered_count: 0,
-    })),
-    connection: lifecycleManager.getConnectionState(),
-  });
+  const getHealth = (): HealthResponse => {
+    const connState = lifecycleManager.getConnectionState();
+    let status: HealthResponse["status"];
+    if (connState === "connected") {
+      status = "healthy";
+    } else if (lifecycleManager.isStarted()) {
+      status = "degraded";
+    } else {
+      status = "starting";
+    }
+
+    return {
+      status,
+      version,
+      uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
+      groups: config.groups.map((g) => ({
+        group_id: g.group_id,
+        group_name: g.group_name,
+        status: "initializing",
+        queue_depth: 0,
+        answered_count: 0,
+      })),
+      connection: connState,
+    };
+  };
 
   // Start health server
   const healthServer = await startHealthServer(config.agent.health_port, getHealth);

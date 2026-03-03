@@ -201,6 +201,11 @@ describe("getReconnectDelay", () => {
     expect(getReconnectDelay(5, delays)).toBe(5000);
     expect(getReconnectDelay(100, delays)).toBe(5000);
   });
+
+  it("should return fallback delay of 1000ms for empty delays array", () => {
+    expect(getReconnectDelay(0, [])).toBe(1000);
+    expect(getReconnectDelay(5, [])).toBe(1000);
+  });
 });
 
 describe("ConnectionManager", () => {
@@ -597,5 +602,171 @@ describe("ConnectionManager", () => {
     ]);
 
     await expect(joinPromise).rejects.toThrow("Channel join failed");
+  });
+
+  it("should reset state to disconnected when auth fails", async () => {
+    const mockWs = new MockWebSocket();
+    const stateChanges: ConnectionState[] = [];
+
+    // Create a fetch that returns 401
+    const failingFetch = vi.fn(async () => {
+      return new Response("Unauthorized", { status: 401 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const cm = new ConnectionManager({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+      onQuestion: () => {},
+      onConnectionStateChange: (state) => {
+        stateChanges.push(state);
+      },
+      webSocketFactory: () => mockWs,
+      fetchFn: failingFetch,
+    });
+
+    await expect(cm.connect()).rejects.toThrow("Authentication failed (401)");
+    expect(cm.getState()).toBe("disconnected");
+    expect(stateChanges).toEqual(["connecting", "disconnected"]);
+  });
+
+  it("should reject connect promise when socket closes before opening", async () => {
+    const mockWs = new MockWebSocket();
+    const mockFetch = createMockFetch();
+    const stateChanges: ConnectionState[] = [];
+
+    const cm = new ConnectionManager({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+      onQuestion: () => {},
+      onConnectionStateChange: (state) => {
+        stateChanges.push(state);
+      },
+      webSocketFactory: () => mockWs,
+      fetchFn: mockFetch,
+    });
+
+    const connectPromise = cm.connect();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Socket closes before onopen fires
+    mockWs.simulateClose();
+
+    await expect(connectPromise).rejects.toThrow("WebSocket closed before connection established");
+    expect(cm.getState()).toBe("disconnected");
+  });
+
+  it("should re-join channels after reconnect and deliver new messages", async () => {
+    vi.useFakeTimers();
+
+    const mockWs1 = new MockWebSocket();
+    const mockWs2 = new MockWebSocket();
+    let wsIndex = 0;
+    const websockets = [mockWs1, mockWs2];
+
+    const mockFetch = createMockFetch();
+    const questions: { question: IncomingQuestion; groupConfig: GroupConfig }[] = [];
+
+    const cm = new ConnectionManager({
+      config: createMockConfig({
+        agent: {
+          queue_max_depth: 50,
+          reconnect_delays_ms: [100, 200, 500],
+          health_port: 8080,
+          health_summary_interval_s: 300,
+          shutdown_timeout_ms: 10000,
+          log_level: "info",
+        },
+      }),
+      logger: createMockLogger(),
+      onQuestion: (question, groupConfig) => {
+        questions.push({ question, groupConfig });
+      },
+      onConnectionStateChange: () => {},
+      webSocketFactory: () => {
+        const ws = websockets[wsIndex];
+        wsIndex++;
+        return ws;
+      },
+      fetchFn: mockFetch,
+    });
+
+    // 1. Initial connect
+    const connectPromise = cm.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    mockWs1.simulateOpen();
+    await connectPromise;
+
+    // 2. Join a group
+    const group = createMockGroupConfig();
+    const joinPromise = cm.joinGroup(group);
+    const joinMsg1 = JSON.parse(mockWs1.sentMessages[0]) as unknown[];
+    mockWs1.simulateMessage([
+      joinMsg1[0],
+      joinMsg1[1],
+      `group:${group.group_id}`,
+      "phx_reply",
+      { status: "ok", response: {} },
+    ]);
+    await joinPromise;
+
+    // 3. Simulate disconnect
+    mockWs1.simulateClose();
+
+    // 4. Advance timer to trigger reconnect (100ms delay)
+    await vi.advanceTimersByTimeAsync(100);
+    // Flush fetch promise
+    await vi.advanceTimersByTimeAsync(0);
+    // Simulate second WebSocket opening
+    mockWs2.simulateOpen();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(cm.getState()).toBe("connected");
+
+    // 5. Check that phx_join was re-sent on the second WebSocket
+    const rejoinMessages = mockWs2.sentMessages.filter((m) => {
+      const parsed = JSON.parse(m) as unknown[];
+      return parsed[3] === "phx_join";
+    });
+    expect(rejoinMessages.length).toBeGreaterThanOrEqual(1);
+
+    const rejoinMsg = JSON.parse(rejoinMessages[0]) as unknown[];
+    expect(rejoinMsg[2]).toBe(`group:${group.group_id}`);
+    expect(rejoinMsg[4]).toEqual({ api_key: "test-api-key-123" });
+
+    // 6. Simulate successful rejoin reply
+    mockWs2.simulateMessage([
+      rejoinMsg[0],
+      rejoinMsg[1],
+      `group:${group.group_id}`,
+      "phx_reply",
+      { status: "ok", response: {} },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 7. Simulate a new_message after reconnect and verify it's delivered
+    const questionPayload: IncomingQuestion = {
+      message_id: "msg-reconnect-001",
+      group_id: group.group_id,
+      sender_id: "user-789",
+      sender_name: "Bob",
+      content: "Question after reconnect?",
+      message_type: "question",
+      inserted_at: "2026-03-03T12:00:00Z",
+      parent_message_id: null,
+    };
+    mockWs2.simulateMessage([
+      null,
+      null,
+      `group:${group.group_id}`,
+      "new_message",
+      questionPayload,
+    ]);
+
+    expect(questions).toHaveLength(1);
+    expect(questions[0].question.message_id).toBe("msg-reconnect-001");
+    expect(questions[0].question.content).toBe("Question after reconnect?");
+    expect(questions[0].groupConfig.group_id).toBe(group.group_id);
+
+    vi.useRealTimers();
   });
 });

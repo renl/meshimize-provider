@@ -15,6 +15,7 @@ export interface LifecycleManagerOptions {
 export class LifecycleManager {
   private connectionManager: ConnectionManager | null = null;
   private connectionState: ConnectionState = "disconnected";
+  private _started: boolean = false;
 
   private readonly config: Config;
   private readonly logger: pino.Logger;
@@ -57,11 +58,15 @@ export class LifecycleManager {
     await this.connectionManager.connect();
 
     // 3. Join all groups from config
+    let joinedCount = 0;
+    let failedCount = 0;
     for (const group of this.config.groups) {
       try {
         await this.connectionManager.joinGroup(group);
+        joinedCount++;
         this.logger.info({ groupId: group.group_id, groupName: group.group_name }, "Joined group");
       } catch (err) {
+        failedCount++;
         this.logger.error(
           { err, groupId: group.group_id, groupName: group.group_name },
           "Failed to join group",
@@ -69,16 +74,31 @@ export class LifecycleManager {
       }
     }
 
+    this._started = true;
+
     // 4. Log ready state
-    this.logger.info(
-      { version: this.version, groups: this.config.groups.length },
-      "LifecycleManager ready",
-    );
+    if (failedCount > 0) {
+      this.logger.warn(
+        {
+          version: this.version,
+          joinedCount,
+          failedCount,
+          totalGroups: this.config.groups.length,
+        },
+        "LifecycleManager ready with failures",
+      );
+    } else {
+      this.logger.info(
+        { version: this.version, joinedCount, totalGroups: this.config.groups.length },
+        "LifecycleManager ready",
+      );
+    }
   }
 
   /** Shutdown: disconnect, drain */
   async shutdown(): Promise<void> {
     this.logger.info("LifecycleManager shutting down");
+    this._started = false;
 
     if (this.connectionManager) {
       await this.connectionManager.disconnect();
@@ -91,5 +111,9 @@ export class LifecycleManager {
 
   getConnectionState(): ConnectionState {
     return this.connectionState;
+  }
+
+  isStarted(): boolean {
+    return this._started;
   }
 }

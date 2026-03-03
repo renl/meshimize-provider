@@ -71,6 +71,7 @@ export type WebSocketFactory = (url: string) => WebSocketLike;
  * Returns the delay at `attempt` index, clamped to the last element.
  */
 export function getReconnectDelay(attempt: number, delays: number[]): number {
+  if (delays.length === 0) return 1000;
   return delays[Math.min(attempt, delays.length - 1)];
 }
 
@@ -135,48 +136,53 @@ export class ConnectionManager {
     this.explicitDisconnect = false;
     this.setState("connecting");
 
-    // 1. REST authentication
-    const serverUrl = this.config.meshimize.server_url.replace(/\/$/, "");
-    const authUrl = `${serverUrl}/api/v1/auth/login`;
+    try {
+      // 1. REST authentication
+      const serverUrl = this.config.meshimize.server_url.replace(/\/$/, "");
+      const authUrl = `${serverUrl}/api/v1/auth/login`;
 
-    this.logger.info({ url: authUrl }, "Authenticating with Meshimize server");
+      this.logger.info({ url: authUrl }, "Authenticating with Meshimize server");
 
-    const authResponse = await this.fetchFn(authUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.config.meshimize.api_key,
-      },
-      body: JSON.stringify({}),
-    });
+      const authResponse = await this.fetchFn(authUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.config.meshimize.api_key,
+        },
+        body: JSON.stringify({}),
+      });
 
-    if (!authResponse.ok) {
-      const errorText = await authResponse.text();
-      throw new Error(`Authentication failed (${authResponse.status}): ${errorText}`);
+      if (!authResponse.ok) {
+        const errorText = await authResponse.text();
+        throw new Error(`Authentication failed (${authResponse.status}): ${errorText}`);
+      }
+
+      const authData = (await authResponse.json()) as AuthResponse;
+      this.token = authData.data.token;
+      this.accountId = authData.data.account.id;
+
+      this.logger.info(
+        { accountId: this.accountId, displayName: authData.data.account.display_name },
+        "Authenticated successfully",
+      );
+
+      // 2. Build WebSocket URL
+      const wsProtocol = serverUrl.startsWith("https://") ? "wss://" : "ws://";
+      const hostAndPath = serverUrl.replace(/^https?:\/\//, "");
+      const wsPath = this.config.meshimize.ws_path;
+      const wsUrl = `${wsProtocol}${hostAndPath}${wsPath}?token=${this.token}&vsn=2.0.0`;
+
+      this.logger.debug(
+        { wsUrl: wsUrl.replace(/token=[^&]+/, "token=[REDACTED]") },
+        "Connecting WebSocket",
+      );
+
+      // 3. Create and connect WebSocket
+      await this.connectWebSocket(wsUrl);
+    } catch (err) {
+      this.setState("disconnected");
+      throw err;
     }
-
-    const authData = (await authResponse.json()) as AuthResponse;
-    this.token = authData.data.token;
-    this.accountId = authData.data.account.id;
-
-    this.logger.info(
-      { accountId: this.accountId, displayName: authData.data.account.display_name },
-      "Authenticated successfully",
-    );
-
-    // 2. Build WebSocket URL
-    const wsProtocol = serverUrl.startsWith("https://") ? "wss://" : "ws://";
-    const hostAndPath = serverUrl.replace(/^https?:\/\//, "");
-    const wsPath = this.config.meshimize.ws_path;
-    const wsUrl = `${wsProtocol}${hostAndPath}${wsPath}?token=${this.token}&vsn=2.0.0`;
-
-    this.logger.debug(
-      { wsUrl: wsUrl.replace(/token=[^&]+/, "token=[REDACTED]") },
-      "Connecting WebSocket",
-    );
-
-    // 3. Create and connect WebSocket
-    await this.connectWebSocket(wsUrl);
   }
 
   private connectWebSocket(wsUrl: string): Promise<void> {
@@ -199,6 +205,11 @@ export class ConnectionManager {
 
       this.socket.onclose = () => {
         this.logger.info("WebSocket closed");
+        if (this.state === "connecting") {
+          this.setState("disconnected");
+          reject(new Error("WebSocket closed before connection established"));
+          return;
+        }
         this.handleDisconnect();
       };
 
@@ -472,13 +483,69 @@ export class ConnectionManager {
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect().catch((err) => {
-        this.logger.error({ err }, "Reconnection failed");
-        // handleDisconnect will be called again by the socket close handler
-        // or we need to schedule another attempt
-        this.handleDisconnect();
-      });
+      this.connect()
+        .then(() => this.rejoinChannels())
+        .catch((err) => {
+          this.logger.error({ err }, "Reconnection failed");
+          // handleDisconnect will be called again by the socket close handler
+          // or we need to schedule another attempt
+          this.handleDisconnect();
+        });
     }, delay);
+  }
+
+  /** Re-join all previously joined channels after reconnect */
+  private async rejoinChannels(): Promise<void> {
+    for (const [topic, channel] of this.channels) {
+      try {
+        const joinRef = this.makeRef();
+        const ref = this.makeRef();
+        channel.joinRef = joinRef;
+
+        this.logger.info(
+          { topic, groupName: channel.groupConfig.group_name },
+          "Re-joining channel after reconnect",
+        );
+
+        const joinPayload = { api_key: this.config.meshimize.api_key };
+        this.sendMessage([joinRef, ref, topic, "phx_join", joinPayload]);
+
+        // Wait for join reply with timeout
+        await new Promise<void>((resolve, reject) => {
+          this.pendingJoins.set(ref, { resolve, reject });
+
+          const timeout = setTimeout(() => {
+            this.pendingJoins.delete(ref);
+            reject(new Error(`Rejoin timeout for channel ${topic}`));
+          }, 10000);
+
+          const original = this.pendingJoins.get(ref);
+          if (original) {
+            this.pendingJoins.set(ref, {
+              resolve: () => {
+                clearTimeout(timeout);
+                original.resolve();
+              },
+              reject: (err: Error) => {
+                clearTimeout(timeout);
+                original.reject(err);
+              },
+            });
+          }
+        });
+
+        channel.joined = true;
+        this.logger.info(
+          { topic, groupName: channel.groupConfig.group_name },
+          "Channel re-joined successfully",
+        );
+      } catch (err) {
+        this.logger.error(
+          { err, topic, groupName: channel.groupConfig.group_name },
+          "Failed to re-join channel after reconnect",
+        );
+      }
+    }
   }
 
   /** Verify the agent has responder/owner role in the group (non-blocking) */
