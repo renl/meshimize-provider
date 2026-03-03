@@ -1,0 +1,10 @@
+node_modules/
+dist/
+data/
+docs-source/
+*.env
+.env.*
+!.env.example
+coverage/
+.DS_Store
+.worktree/
