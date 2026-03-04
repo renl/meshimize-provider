@@ -73,6 +73,15 @@ export class AnswerGenerator {
         break;
       }
 
+      // Truncate oversized first chunk to fit within token budget
+      if (partTokens > MAX_CONTEXT_TOKENS && contextParts.length === 0) {
+        const maxChars = MAX_CONTEXT_TOKENS * 4; // Reverse the token estimate heuristic
+        const truncatedPart = part.slice(0, maxChars);
+        contextParts.push(truncatedPart);
+        totalTokens += MAX_CONTEXT_TOKENS;
+        break;
+      }
+
       contextParts.push(part);
       totalTokens += partTokens;
     }

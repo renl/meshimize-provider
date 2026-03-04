@@ -38,6 +38,8 @@ export class AnswerPoster {
     });
 
     let failureCount = 0;
+    let rateLimitRetries = 0;
+    const MAX_RATE_LIMIT_RETRIES = 3;
     let lastStatus = 0;
     let lastErrorText = "";
 
@@ -51,16 +53,33 @@ export class AnswerPoster {
 
         lastStatus = response.status;
 
-        if (response.status === 201) {
-          return { success: true, httpStatus: 201, deadLettered: false };
+        if (response.ok) {
+          return { success: true, httpStatus: response.status, deadLettered: false };
         }
 
         // HTTP 429 — rate limited; read Retry-After, wait, retry (NOT counted as failure)
         if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After");
-          const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 2000;
+          rateLimitRetries++;
+          if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
+            // Exceeded max 429 retries — dead letter
+            this.options.logger.error({
+              msg: "DEAD_LETTER: Rate limit retries exhausted",
+              dead_letter: true,
+              question_id: answer.parent_message_id,
+              group_id: groupId,
+              answer_type: answer.message_type,
+              answer_content_length: answer.content.length,
+              http_status: 429,
+              error_message: "Rate limit retries exhausted",
+            });
+            return { success: false, httpStatus: 429, deadLettered: true };
+          }
+
+          const retryAfterRaw = response.headers.get("Retry-After");
+          const parsedMs = retryAfterRaw ? parseInt(retryAfterRaw, 10) * 1000 : NaN;
+          const waitMs = Number.isFinite(parsedMs) && parsedMs > 0 ? parsedMs : 2000;
           this.options.logger.warn(
-            { groupId, status: 429, retryAfterMs: waitMs },
+            { groupId, status: 429, retryAfterMs: waitMs, rateLimitRetry: rateLimitRetries },
             "Rate limited — waiting before retry",
           );
           await new Promise<void>((resolve) => setTimeout(resolve, waitMs));

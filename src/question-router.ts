@@ -24,7 +24,7 @@ export class QuestionRouter {
       groupName: group.group_name,
       slug: group.slug,
       channelTopic: `group:${group.group_id}`,
-      status: "ready",
+      status: "initializing",
       queue: [],
       activeWorkers: 0,
       maxConcurrency: group.max_concurrency,
@@ -35,12 +35,29 @@ export class QuestionRouter {
     this.groupConfigs.set(group.group_id, group);
   }
 
+  /** Update a group's status (e.g., after join result) */
+  updateGroupStatus(groupId: string, status: GroupState["status"]): void {
+    const group = this.groups.get(groupId);
+    if (group) {
+      group.status = status;
+    }
+  }
+
   /**
    * Enqueue a question for processing.
    * If queue is full (>= maxQueueDepth), drop and log WARN.
    * If concurrency slots available, start processing immediately.
    */
   enqueue(question: IncomingQuestion): void {
+    // Guard: reject enqueue after stop() — prevent silent message loss during shutdown
+    if (this.stopped) {
+      this.options.logger.warn(
+        { groupId: question.group_id, messageId: question.message_id },
+        "Question dropped — router is stopped",
+      );
+      return;
+    }
+
     const group = this.groups.get(question.group_id);
     if (!group) {
       this.options.logger.warn(

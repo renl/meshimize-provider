@@ -246,4 +246,26 @@ describe("AnswerGenerator", () => {
     expect(estimateTokens("abcde")).toBe(2);
     expect(estimateTokens("a".repeat(100))).toBe(25);
   });
+
+  it("should truncate oversized first chunk to fit within MAX_CONTEXT_TOKENS", async () => {
+    const generator = new AnswerGenerator({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+    });
+
+    // Create a single chunk that massively exceeds the token budget
+    const oversizedContent = "x".repeat(MAX_CONTEXT_TOKENS * 8); // 8x over budget
+    const chunks = [createMockChunk({ content: oversizedContent, source: "huge-doc.md" })];
+
+    await generator.generate("Question?", chunks, createMockGroupConfig());
+
+    const messages = mockInvoke.mock.calls[0][0] as { role: string; content: string }[];
+    const userMessage = messages[1].content;
+
+    // The context should be truncated — the user message should NOT contain the full oversized content
+    // MAX_CONTEXT_TOKENS * 4 chars is the max (reverse heuristic), plus source prefix and framing (~200 chars)
+    expect(userMessage.length).toBeLessThan(oversizedContent.length);
+    // Verify it was actually truncated, not just fully included
+    expect(userMessage).not.toContain(oversizedContent);
+  });
 });

@@ -251,4 +251,82 @@ describe("AnswerPoster", () => {
     expect(urls).toContain("https://api.meshimize.com/api/v1/groups/group-aaa/messages");
     expect(urls).toContain("https://api.meshimize.com/api/v1/groups/group-bbb/messages");
   });
+
+  it("should dead-letter after max 429 rate-limit retries exhausted", async () => {
+    // Return 429 indefinitely
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValue(createMockResponse(429, "Too Many Requests", { "Retry-After": "1" }));
+
+    const logger = createMockLogger();
+    const errorSpy = vi.spyOn(logger, "error");
+
+    const poster = new AnswerPoster({
+      serverUrl: "https://api.meshimize.com",
+      token: "test-token",
+      logger,
+      fetchFn: mockFetch as unknown as typeof globalThis.fetch,
+    });
+
+    const resultPromise = poster.post("group-abc", createMockAnswer());
+
+    // Advance through all the retry waits (3 retries × 1s each + buffer)
+    await vi.advanceTimersByTimeAsync(10000);
+
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.httpStatus).toBe(429);
+    expect(result.deadLettered).toBe(true);
+
+    // Verify DEAD_LETTER log
+    expect(errorSpy).toHaveBeenCalled();
+    const errorCalls = errorSpy.mock.calls;
+    const deadLetterCall = errorCalls.find(
+      (c) => (c[0] as Record<string, unknown>)?.dead_letter === true,
+    );
+    expect(deadLetterCall).toBeDefined();
+  });
+
+  it("should handle invalid Retry-After header gracefully (use default delay)", async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        createMockResponse(429, "Too Many Requests", { "Retry-After": "not-a-number" }),
+      )
+      .mockResolvedValueOnce(createMockResponse(201));
+
+    const poster = new AnswerPoster({
+      serverUrl: "https://api.meshimize.com",
+      token: "test-token",
+      logger: createMockLogger(),
+      fetchFn: mockFetch as unknown as typeof globalThis.fetch,
+    });
+
+    const resultPromise = poster.post("group-abc", createMockAnswer());
+
+    // Advance past the default 2s fallback
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const result = await resultPromise;
+
+    expect(result).toEqual({ success: true, httpStatus: 201, deadLettered: false });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("should treat any 2xx response as success (not just 201)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue(createMockResponse(200, "OK"));
+
+    const poster = new AnswerPoster({
+      serverUrl: "https://api.meshimize.com",
+      token: "test-token",
+      logger: createMockLogger(),
+      fetchFn: mockFetch as unknown as typeof globalThis.fetch,
+    });
+
+    const result = await poster.post("group-abc", createMockAnswer());
+
+    expect(result).toEqual({ success: true, httpStatus: 200, deadLettered: false });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
 });

@@ -358,7 +358,7 @@ describe("QuestionRouter", () => {
       groupName: group.group_name,
       slug: group.slug,
       channelTopic: `group:${group.group_id}`,
-      status: "ready",
+      status: "initializing",
       queue: [],
       activeWorkers: 0,
       maxConcurrency: group.max_concurrency,
@@ -383,5 +383,61 @@ describe("QuestionRouter", () => {
     expect(warnSpy).toHaveBeenCalled();
     const lastCall = warnSpy.mock.calls[0];
     expect(String(lastCall[1])).toContain("unknown group");
+  });
+
+  it("should drop question and log WARN when enqueue called after stop()", () => {
+    const group = createMockGroupConfig();
+    const logger = createMockLogger();
+    const warnSpy = vi.spyOn(logger, "warn");
+
+    const router = new QuestionRouter({
+      maxQueueDepth: 50,
+      logger,
+      processQuestion: vi.fn().mockResolvedValue(undefined),
+    });
+
+    router.registerGroup(group);
+    router.stop();
+
+    router.enqueue(createMockQuestion());
+
+    expect(warnSpy).toHaveBeenCalled();
+    const lastCall = warnSpy.mock.calls[warnSpy.mock.calls.length - 1];
+    expect(String(lastCall[1])).toContain("router is stopped");
+
+    // Verify processQuestion was NOT called
+    expect(processQuestion).not.toHaveBeenCalled();
+  });
+
+  it("should register group with status 'initializing'", () => {
+    const group = createMockGroupConfig();
+    const router = new QuestionRouter({
+      maxQueueDepth: 50,
+      logger: createMockLogger(),
+      processQuestion: vi.fn().mockResolvedValue(undefined),
+    });
+
+    router.registerGroup(group);
+
+    const stats = router.getStats();
+    expect(stats[0].status).toBe("initializing");
+  });
+
+  it("should update group status via updateGroupStatus()", () => {
+    const group = createMockGroupConfig();
+    const router = new QuestionRouter({
+      maxQueueDepth: 50,
+      logger: createMockLogger(),
+      processQuestion: vi.fn().mockResolvedValue(undefined),
+    });
+
+    router.registerGroup(group);
+    expect(router.getStats()[0].status).toBe("initializing");
+
+    router.updateGroupStatus(group.group_id, "ready");
+    expect(router.getStats()[0].status).toBe("ready");
+
+    router.updateGroupStatus(group.group_id, "degraded");
+    expect(router.getStats()[0].status).toBe("degraded");
   });
 });

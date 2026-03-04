@@ -40,6 +40,9 @@ export class LifecycleManager {
   async start(): Promise<void> {
     this.logger.info({ version: this.version }, "LifecycleManager starting");
 
+    // Track groups that failed ingestion
+    const ingestionFailedGroupIds = new Set<string>();
+
     // 1. Create RagPipeline
     this.ragPipeline = new RagPipeline({
       persistDirectory: this.config.vector_store.persist_directory,
@@ -80,6 +83,7 @@ export class LifecycleManager {
           );
         }
       } catch (err) {
+        ingestionFailedGroupIds.add(group.group_id);
         this.logger.error(
           { err, groupId: group.group_id, groupName: group.group_name },
           "Ingestion failed for group",
@@ -124,6 +128,12 @@ export class LifecycleManager {
       this.questionRouter.registerGroup(group);
     }
 
+    // Mark groups with failed ingestion as degraded
+    for (const groupId of ingestionFailedGroupIds) {
+      this.questionRouter.updateGroupStatus(groupId, "degraded");
+      this.logger.warn({ groupId }, "Group marked as degraded due to ingestion failure");
+    }
+
     // 7. Create ConnectionManager with onQuestion wired to router.enqueue
     const router = this.questionRouter;
     const cmOptions: ConnectionManagerOptions = {
@@ -150,9 +160,14 @@ export class LifecycleManager {
       try {
         await this.connectionManager.joinGroup(group);
         joinedCount++;
+        // Only set "ready" if not already degraded from ingestion failure
+        if (!ingestionFailedGroupIds.has(group.group_id)) {
+          this.questionRouter.updateGroupStatus(group.group_id, "ready");
+        }
         this.logger.info({ groupId: group.group_id, groupName: group.group_name }, "Joined group");
       } catch (err) {
         failedCount++;
+        this.questionRouter.updateGroupStatus(group.group_id, "degraded");
         this.logger.error(
           { err, groupId: group.group_id, groupName: group.group_name },
           "Failed to join group",

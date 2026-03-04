@@ -364,4 +364,24 @@ describe("LifecycleManager", () => {
 
     await lm.shutdown();
   });
+
+  it("should mark groups as degraded when ingestion fails", async () => {
+    mockNeedsIngestion.mockResolvedValue(true);
+    mockIngest.mockRejectedValue(new Error("ChromaDB unavailable"));
+
+    const group = createMockGroupConfig();
+    const lm = new LifecycleManager({
+      config: createMockConfig([group]),
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    await lm.start();
+
+    const router = lm.getQuestionRouter()!;
+    const stats = router.getStats();
+    expect(stats[0].status).toBe("degraded");
+
+    await lm.shutdown();
+  });
 });
