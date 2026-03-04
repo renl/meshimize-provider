@@ -154,4 +154,22 @@ describe("ingest-command", () => {
 
     expect(mockExit).toHaveBeenCalledWith(1);
   });
+
+  it("should log partial failure summary with warn level when some groups fail", async () => {
+    // First group succeeds, second group fails
+    mockIngest
+      .mockResolvedValueOnce({
+        groupId: "550e8400-e29b-41d4-a716-446655440000",
+        groupName: "Fly.io Docs",
+        docCount: 5,
+        chunkCount: 25,
+        durationMs: 100,
+      })
+      .mockRejectedValueOnce(new Error("Embedding API error"));
+
+    const configPath = writeYamlConfig(tempDir, validConfig());
+    await runIngestCommand(configPath);
+
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
 });

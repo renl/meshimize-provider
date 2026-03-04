@@ -61,11 +61,19 @@ export async function runIngestCommand(configPath: string): Promise<void> {
   const totalDocs = results.reduce((sum, r) => sum + r.docCount, 0);
   const totalChunks = results.reduce((sum, r) => sum + r.chunkCount, 0);
   const totalDuration = results.reduce((sum, r) => sum + r.durationMs, 0);
+  const failedCount = config.groups.length - results.length;
 
-  logger.info(
-    { totalDocs, totalChunks, totalDuration, groupCount: config.groups.length },
-    `Ingestion complete: ${totalDocs} files → ${totalChunks} chunks in ${totalDuration}ms`,
-  );
+  if (hasFailure) {
+    logger.warn(
+      { totalDocs, totalChunks, totalDuration, groupCount: config.groups.length, failedCount },
+      `Ingestion partially complete: ${totalDocs} files → ${totalChunks} chunks in ${totalDuration}ms (${results.length}/${config.groups.length} groups succeeded, ${failedCount} failed)`,
+    );
+  } else {
+    logger.info(
+      { totalDocs, totalChunks, totalDuration, groupCount: config.groups.length },
+      `Ingestion complete: ${totalDocs} files → ${totalChunks} chunks in ${totalDuration}ms`,
+    );
+  }
 
   // 6. Exit
   process.exit(hasFailure ? 1 : 0);

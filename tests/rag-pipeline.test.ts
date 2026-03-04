@@ -371,7 +371,7 @@ describe("rag-pipeline", () => {
     mockCount.mockResolvedValue(100);
     mockCollection.metadata = {
       ingested_at: new Date().toISOString(),
-      group_id: "test-group-id",
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
     };
 
     const pipeline = new RagPipeline(createTestOptions());
@@ -387,6 +387,46 @@ describe("rag-pipeline", () => {
     mockCollection.metadata = {
       ingested_at: "not-a-valid-date",
       group_id: "test-group-id",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(true);
+  });
+
+  // ─── deleteCollection error handling ───
+
+  it("should rethrow non-not-found errors from deleteCollection during ingest", async () => {
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nSome content.");
+    mockDeleteCollection.mockRejectedValue(new Error("network timeout"));
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    await expect(pipeline.ingest(group)).rejects.toThrow("network timeout");
+  });
+
+  it("should ignore collection-not-found errors from deleteCollection during ingest", async () => {
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nSome content.");
+    mockDeleteCollection.mockRejectedValue(new Error("collection does not exist"));
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const result = await pipeline.ingest(group);
+    expect(result.docCount).toBe(1);
+  });
+
+  // ─── group_id mismatch ───
+
+  it("should return true from needsIngestion when group_id mismatches", async () => {
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "old-group-id-that-does-not-match",
     };
 
     const pipeline = new RagPipeline(createTestOptions());

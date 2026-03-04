@@ -290,8 +290,18 @@ export class RagPipeline {
     // Delete existing collection if present, then create fresh
     try {
       await this.client.deleteCollection({ name: collectionName });
-    } catch {
-      // Collection may not exist — that's fine
+    } catch (error: unknown) {
+      // Only ignore "collection not found" errors; rethrow everything else
+      const isNotFound =
+        error instanceof Error &&
+        (error.message.includes("does not exist") || error.message.includes("not found"));
+      if (!isNotFound) {
+        this.options.logger.warn(
+          { err: error, collectionName },
+          "Unexpected error deleting collection",
+        );
+        throw error;
+      }
     }
 
     const collection = await this.client.getOrCreateCollection({
@@ -382,6 +392,11 @@ export class RagPipeline {
       } else {
         // No ingested_at metadata — needs ingestion
         return true;
+      }
+
+      // Validate group_id matches
+      if (collection.metadata?.group_id && collection.metadata.group_id !== group.group_id) {
+        return true; // group_id mismatch — needs re-ingestion
       }
 
       return false;
