@@ -1,0 +1,122 @@
+// ─── Answer Poster — REST API POST with retry + dead-letter logging ───
+
+import type pino from "pino";
+import type { OutgoingAnswer } from "./types.js";
+
+export interface AnswerPosterOptions {
+  serverUrl: string;
+  token: string;
+  logger: pino.Logger;
+  fetchFn?: typeof globalThis.fetch;
+}
+
+export interface PostResult {
+  success: boolean;
+  httpStatus: number;
+  deadLettered: boolean;
+}
+
+export class AnswerPoster {
+  private readonly fetchFn: typeof globalThis.fetch;
+
+  constructor(private readonly options: AnswerPosterOptions) {
+    this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
+  }
+
+  async post(groupId: string, answer: OutgoingAnswer): Promise<PostResult> {
+    const url = `${this.options.serverUrl.replace(/\/$/, "")}/api/v1/groups/${groupId}/messages`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.options.token}`,
+    };
+    const body = JSON.stringify({
+      message: {
+        content: answer.content,
+        message_type: answer.message_type,
+        parent_message_id: answer.parent_message_id,
+      },
+    });
+
+    let failureCount = 0;
+    let lastStatus = 0;
+    let lastErrorText = "";
+
+    while (true) {
+      try {
+        const response = await this.fetchFn(url, {
+          method: "POST",
+          headers,
+          body,
+        });
+
+        lastStatus = response.status;
+
+        if (response.status === 201) {
+          return { success: true, httpStatus: 201, deadLettered: false };
+        }
+
+        // HTTP 429 — rate limited; read Retry-After, wait, retry (NOT counted as failure)
+        if (response.status === 429) {
+          const retryAfter = response.headers.get("Retry-After");
+          const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 2000;
+          this.options.logger.warn(
+            { groupId, status: 429, retryAfterMs: waitMs },
+            "Rate limited — waiting before retry",
+          );
+          await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+          continue; // Retry without incrementing failure count
+        }
+
+        // Other error
+        lastErrorText = await response.text();
+        failureCount++;
+
+        if (failureCount >= 2) {
+          // Dead letter
+          this.options.logger.error({
+            msg: "DEAD_LETTER: Answer post failed after retry",
+            dead_letter: true,
+            question_id: answer.parent_message_id,
+            group_id: groupId,
+            answer_type: answer.message_type,
+            answer_content_length: answer.content.length,
+            http_status: lastStatus,
+            error_message: lastErrorText,
+          });
+          return { success: false, httpStatus: lastStatus, deadLettered: true };
+        }
+
+        // Wait 2s before retry
+        this.options.logger.warn(
+          { groupId, status: lastStatus, attempt: failureCount },
+          "Answer post failed — retrying in 2s",
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+      } catch (err) {
+        lastErrorText = err instanceof Error ? err.message : String(err);
+        lastStatus = 0;
+        failureCount++;
+
+        if (failureCount >= 2) {
+          this.options.logger.error({
+            msg: "DEAD_LETTER: Answer post failed after retry",
+            dead_letter: true,
+            question_id: answer.parent_message_id,
+            group_id: groupId,
+            answer_type: answer.message_type,
+            answer_content_length: answer.content.length,
+            http_status: lastStatus,
+            error_message: lastErrorText,
+          });
+          return { success: false, httpStatus: lastStatus, deadLettered: true };
+        }
+
+        this.options.logger.warn(
+          { err, groupId, attempt: failureCount },
+          "Answer post failed — retrying in 2s",
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+  }
+}

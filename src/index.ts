@@ -63,6 +63,9 @@ async function main(): Promise<void> {
   // Health response builder
   const getHealth = (): HealthResponse => {
     const connState = lifecycleManager.getConnectionState();
+    const router = lifecycleManager.getQuestionRouter();
+    const stats = router?.getStats() ?? [];
+
     let status: HealthResponse["status"];
     if (connState === "connected") {
       status = "healthy";
@@ -74,17 +77,29 @@ async function main(): Promise<void> {
       status = "starting";
     }
 
+    // Build groups from live router stats if available, else fall back to config
+    const groups =
+      stats.length > 0
+        ? stats.map((s) => ({
+            group_id: s.groupId,
+            group_name: s.groupName,
+            status: s.status,
+            queue_depth: s.queue.length,
+            answered_count: s.answeredCount,
+          }))
+        : config.groups.map((g) => ({
+            group_id: g.group_id,
+            group_name: g.group_name,
+            status: "initializing",
+            queue_depth: 0,
+            answered_count: 0,
+          }));
+
     return {
       status,
       version,
       uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
-      groups: config.groups.map((g) => ({
-        group_id: g.group_id,
-        group_name: g.group_name,
-        status: "initializing",
-        queue_depth: 0,
-        answered_count: 0,
-      })),
+      groups,
       connection: connState,
     };
   };
@@ -97,7 +112,7 @@ async function main(): Promise<void> {
   try {
     await lifecycleManager.start();
     startAttempted = true;
-    logger.info("meshimize-provider ready (Slice 3 — connection manager active)");
+    logger.info("meshimize-provider ready");
   } catch (err) {
     startAttempted = true;
     logger.error({ err }, "Failed to start lifecycle manager — running in degraded mode");
