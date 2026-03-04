@@ -5,7 +5,6 @@ import pino from "pino";
 
 // ─── Mock ConnectionManager ───
 
-// We mock the connection-manager module so LifecycleManager uses a fake ConnectionManager
 vi.mock("../src/connection-manager.js", () => {
   const mockConnect = vi.fn().mockResolvedValue(undefined);
   const mockJoinGroup = vi.fn().mockResolvedValue(undefined);
@@ -19,7 +18,6 @@ vi.mock("../src/connection-manager.js", () => {
     getState = mockGetState;
 
     constructor(public readonly options: Record<string, unknown>) {
-      // Store the onConnectionStateChange callback for testing
       MockConnectionManager.lastInstance = this;
       MockConnectionManager.lastOptions = options;
     }
@@ -32,10 +30,10 @@ vi.mock("../src/connection-manager.js", () => {
     static mockGetState = mockGetState;
 
     static resetAll(): void {
-      mockConnect.mockClear().mockResolvedValue(undefined);
-      mockJoinGroup.mockClear().mockResolvedValue(undefined);
-      mockDisconnect.mockClear().mockResolvedValue(undefined);
-      mockGetState.mockClear().mockReturnValue("disconnected");
+      mockConnect.mockReset().mockResolvedValue(undefined);
+      mockJoinGroup.mockReset().mockResolvedValue(undefined);
+      mockDisconnect.mockReset().mockResolvedValue(undefined);
+      mockGetState.mockReset().mockReturnValue("disconnected");
       MockConnectionManager.lastInstance = null;
       MockConnectionManager.lastOptions = null;
     }
@@ -47,6 +45,56 @@ vi.mock("../src/connection-manager.js", () => {
       delays[Math.min(attempt, delays.length - 1)],
   };
 });
+
+// ─── Mock RagPipeline ───
+
+const mockNeedsIngestion = vi.fn().mockResolvedValue(false);
+const mockIngest = vi.fn().mockResolvedValue({
+  groupId: "test",
+  groupName: "Test",
+  docCount: 5,
+  chunkCount: 20,
+  durationMs: 100,
+});
+const mockRetrieve = vi.fn().mockResolvedValue([]);
+
+vi.mock("../src/rag-pipeline.js", () => ({
+  RagPipeline: vi.fn().mockImplementation(() => ({
+    needsIngestion: mockNeedsIngestion,
+    ingest: mockIngest,
+    retrieve: mockRetrieve,
+  })),
+}));
+
+// ─── Mock AnswerGenerator ───
+
+const mockGenerate = vi.fn().mockResolvedValue({
+  content: "Test answer",
+  answerType: "llm_answer",
+  promptTokens: 100,
+  completionTokens: 20,
+  llmMs: 500,
+});
+
+vi.mock("../src/answer-generator.js", () => ({
+  AnswerGenerator: vi.fn().mockImplementation(() => ({
+    generate: mockGenerate,
+  })),
+}));
+
+// ─── Mock AnswerPoster ───
+
+const mockPost = vi.fn().mockResolvedValue({
+  success: true,
+  httpStatus: 201,
+  deadLettered: false,
+});
+
+vi.mock("../src/answer-poster.js", () => ({
+  AnswerPoster: vi.fn().mockImplementation(() => ({
+    post: mockPost,
+  })),
+}));
 
 // Import the mocked module to access static helpers
 const { ConnectionManager: MockCM } = await import("../src/connection-manager.js");
@@ -131,10 +179,33 @@ function createMockConfig(groups?: GroupConfig[]): Config {
 describe("LifecycleManager", () => {
   beforeEach(() => {
     MockConnectionManager.resetAll();
+    // Use mockReset() (not mockClear()) so that changed implementations
+    // (e.g. .mockRejectedValue()) don't leak between tests, then re-apply defaults.
+    mockNeedsIngestion.mockReset().mockResolvedValue(false);
+    mockIngest.mockReset().mockResolvedValue({
+      groupId: "test",
+      groupName: "Test",
+      docCount: 5,
+      chunkCount: 20,
+      durationMs: 100,
+    });
+    mockRetrieve.mockReset().mockResolvedValue([]);
+    mockGenerate.mockReset().mockResolvedValue({
+      content: "Test answer",
+      answerType: "llm_answer",
+      promptTokens: 100,
+      completionTokens: 20,
+      llmMs: 500,
+    });
+    mockPost.mockReset().mockResolvedValue({
+      success: true,
+      httpStatus: 201,
+      deadLettered: false,
+    });
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("should create ConnectionManager, connect, and join all groups on start", async () => {
@@ -158,19 +229,16 @@ describe("LifecycleManager", () => {
 
     await lm.start();
 
-    // ConnectionManager should have been created
     expect(MockConnectionManager.lastInstance).not.toBeNull();
-
-    // connect() should have been called once
     expect(MockConnectionManager.mockConnect).toHaveBeenCalledTimes(1);
-
-    // joinGroup should have been called for each group
     expect(MockConnectionManager.mockJoinGroup).toHaveBeenCalledTimes(2);
     expect(MockConnectionManager.mockJoinGroup).toHaveBeenCalledWith(group1);
     expect(MockConnectionManager.mockJoinGroup).toHaveBeenCalledWith(group2);
+
+    await lm.shutdown();
   });
 
-  it("should call disconnect on ConnectionManager during shutdown", async () => {
+  it("should call router.stop() then router.drain() during graceful shutdown", async () => {
     const lm = new LifecycleManager({
       config: createMockConfig(),
       logger: createMockLogger(),
@@ -178,8 +246,17 @@ describe("LifecycleManager", () => {
     });
 
     await lm.start();
+
+    const router = lm.getQuestionRouter()!;
+    const stopSpy = vi.spyOn(router, "stop");
+    const drainSpy = vi.spyOn(router, "drain");
+
     await lm.shutdown();
 
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+    expect(drainSpy).toHaveBeenCalledTimes(1);
+    // stop() called before drain()
+    expect(stopSpy.mock.invocationCallOrder[0]).toBeLessThan(drainSpy.mock.invocationCallOrder[0]);
     expect(MockConnectionManager.mockDisconnect).toHaveBeenCalledTimes(1);
   });
 
@@ -194,7 +271,6 @@ describe("LifecycleManager", () => {
 
     await lm.start();
 
-    // Simulate the ConnectionManager calling the onConnectionStateChange callback
     const cmOptions = MockConnectionManager.lastOptions as {
       onConnectionStateChange: (state: string) => void;
     };
@@ -205,6 +281,8 @@ describe("LifecycleManager", () => {
 
     cmOptions.onConnectionStateChange("connected");
     expect(lm.getConnectionState()).toBe("connected");
+
+    await lm.shutdown();
   });
 
   it("should reset connection state to disconnected after shutdown", async () => {
@@ -216,7 +294,6 @@ describe("LifecycleManager", () => {
 
     await lm.start();
 
-    // Simulate connected state
     const cmOptions = MockConnectionManager.lastOptions as {
       onConnectionStateChange: (state: string) => void;
     };
@@ -225,5 +302,104 @@ describe("LifecycleManager", () => {
 
     await lm.shutdown();
     expect(lm.getConnectionState()).toBe("disconnected");
+  });
+
+  it("should run ingestion for groups that need it before connecting", async () => {
+    mockNeedsIngestion.mockResolvedValue(true);
+
+    const group = createMockGroupConfig();
+    const lm = new LifecycleManager({
+      config: createMockConfig([group]),
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    await lm.start();
+
+    expect(mockNeedsIngestion).toHaveBeenCalledTimes(1);
+    expect(mockIngest).toHaveBeenCalledTimes(1);
+    // Ingestion should happen before connect
+    expect(mockIngest.mock.invocationCallOrder[0]).toBeLessThan(
+      MockConnectionManager.mockConnect.mock.invocationCallOrder[0],
+    );
+
+    await lm.shutdown();
+  });
+
+  it("should reach ready state after all groups joined", async () => {
+    const group1 = createMockGroupConfig({
+      group_id: "550e8400-e29b-41d4-a716-446655440001",
+      slug: "group-one",
+    });
+    const group2 = createMockGroupConfig({
+      group_id: "550e8400-e29b-41d4-a716-446655440002",
+      slug: "group-two",
+    });
+
+    const lm = new LifecycleManager({
+      config: createMockConfig([group1, group2]),
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    expect(lm.isStarted()).toBe(false);
+
+    await lm.start();
+
+    expect(lm.isStarted()).toBe(true);
+    expect(MockConnectionManager.mockJoinGroup).toHaveBeenCalledTimes(2);
+
+    await lm.shutdown();
+  });
+
+  it("should handle connection failure during startup gracefully", async () => {
+    MockConnectionManager.mockConnect.mockRejectedValue(new Error("Connection refused"));
+
+    const lm = new LifecycleManager({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    await expect(lm.start()).rejects.toThrow("Connection refused");
+    expect(lm.isStarted()).toBe(false);
+  });
+
+  it("should return questionRouter after start via getQuestionRouter", async () => {
+    const lm = new LifecycleManager({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    expect(lm.getQuestionRouter()).toBeNull();
+
+    await lm.start();
+
+    const router = lm.getQuestionRouter();
+    expect(router).not.toBeNull();
+    expect(router!.getStats()).toHaveLength(1);
+
+    await lm.shutdown();
+  });
+
+  it("should mark groups as degraded when ingestion fails", async () => {
+    mockNeedsIngestion.mockResolvedValue(true);
+    mockIngest.mockRejectedValue(new Error("ChromaDB unavailable"));
+
+    const group = createMockGroupConfig();
+    const lm = new LifecycleManager({
+      config: createMockConfig([group]),
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    await lm.start();
+
+    const router = lm.getQuestionRouter()!;
+    const stats = router.getStats();
+    expect(stats[0].status).toBe("degraded");
+
+    await lm.shutdown();
   });
 });
