@@ -239,6 +239,23 @@ export class RagPipeline {
     const docs = this.loadDocuments(group);
     this.options.logger.info({ docCount: docs.length }, "Documents loaded");
 
+    // Delete existing collection if present, then create fresh
+    try {
+      await this.client.deleteCollection({ name: collectionName });
+    } catch (error: unknown) {
+      // Only ignore "collection not found" errors; rethrow everything else
+      const isNotFound =
+        error instanceof Error &&
+        (error.message.includes("does not exist") || error.message.includes("not found"));
+      if (!isNotFound) {
+        this.options.logger.warn(
+          { err: error, collectionName },
+          "Unexpected error deleting collection",
+        );
+        throw error;
+      }
+    }
+
     if (docs.length === 0) {
       return {
         groupId: group.group_id,
@@ -286,23 +303,6 @@ export class RagPipeline {
       embeddingsInstance.embedDocuments.bind(embeddingsInstance),
       embeddingsInstance.embedQuery.bind(embeddingsInstance),
     );
-
-    // Delete existing collection if present, then create fresh
-    try {
-      await this.client.deleteCollection({ name: collectionName });
-    } catch (error: unknown) {
-      // Only ignore "collection not found" errors; rethrow everything else
-      const isNotFound =
-        error instanceof Error &&
-        (error.message.includes("does not exist") || error.message.includes("not found"));
-      if (!isNotFound) {
-        this.options.logger.warn(
-          { err: error, collectionName },
-          "Unexpected error deleting collection",
-        );
-        throw error;
-      }
-    }
 
     const collection = await this.client.getOrCreateCollection({
       name: collectionName,
@@ -394,9 +394,9 @@ export class RagPipeline {
         return true;
       }
 
-      // Validate group_id matches
-      if (collection.metadata?.group_id && collection.metadata.group_id !== group.group_id) {
-        return true; // group_id mismatch — needs re-ingestion
+      // Validate group_id matches (missing group_id also triggers re-ingestion)
+      if (!collection.metadata?.group_id || collection.metadata.group_id !== group.group_id) {
+        return true;
       }
 
       return false;

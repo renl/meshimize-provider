@@ -436,6 +436,21 @@ describe("rag-pipeline", () => {
     expect(needs).toBe(true);
   });
 
+  it("should return true from needsIngestion when group_id is missing from metadata", async () => {
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      // group_id intentionally omitted
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(true);
+  });
+
   // ─── Empty directory ───
 
   it("should produce zero chunks for empty directory", async () => {
@@ -446,6 +461,34 @@ describe("rag-pipeline", () => {
 
     expect(result.docCount).toBe(0);
     expect(result.chunkCount).toBe(0);
+  });
+
+  it("should delete stale collection when docs are empty", async () => {
+    // tempDir has no docs — empty directory
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const result = await pipeline.ingest(group);
+
+    expect(result.docCount).toBe(0);
+    expect(result.chunkCount).toBe(0);
+    // deleteCollection should still be called to clean up stale data
+    expect(mockDeleteCollection).toHaveBeenCalledWith({ name: "meshimize_fly-docs" });
+  });
+
+  it("should delete stale collection when all chunks are empty", async () => {
+    // Write a file with only whitespace — produces docs but 0 chunks
+    writeFileSync(join(tempDir, "empty.md"), "   ");
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const result = await pipeline.ingest(group);
+
+    expect(result.docCount).toBe(1);
+    expect(result.chunkCount).toBe(0);
+    // deleteCollection should still be called to clean up stale data
+    expect(mockDeleteCollection).toHaveBeenCalledWith({ name: "meshimize_fly-docs" });
   });
 
   // ─── ingest result ───
