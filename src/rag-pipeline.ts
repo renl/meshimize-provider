@@ -16,6 +16,7 @@ export interface RagPipelineOptions {
   embeddingApiKey: string;
   embeddingModel: string;
   embeddingDimensions: number;
+  embeddingBaseUrl?: string;
   batchSize: number;
   requestsPerMinute: number;
   logger: pino.Logger;
@@ -190,6 +191,9 @@ export class RagPipeline {
       openAIApiKey: this.options.embeddingApiKey,
       modelName: this.options.embeddingModel,
       dimensions: this.options.embeddingDimensions,
+      ...(this.options.embeddingBaseUrl
+        ? { configuration: { baseURL: this.options.embeddingBaseUrl } }
+        : {}),
     });
   }
 

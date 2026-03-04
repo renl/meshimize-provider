@@ -24,6 +24,7 @@ export async function runValidateCommand(configPath: string): Promise<void> {
     embeddingApiKey: config.embedding.api_key,
     embeddingModel: config.embedding.model,
     embeddingDimensions: config.embedding.dimensions,
+    embeddingBaseUrl: config.embedding.base_url,
     batchSize: config.embedding.batch_size,
     requestsPerMinute: config.embedding.requests_per_minute,
     logger,

@@ -26,6 +26,7 @@ const LLMSchema = z.object({
   provider: z.enum(["openai", "anthropic"]),
   model: z.string().min(1),
   api_key: z.string().min(1),
+  base_url: z.string().url().optional(),
   max_tokens: z.number().int().min(100).max(4000).default(1000),
   temperature: z.number().min(0).max(2).default(0.3),
 });
@@ -34,7 +35,8 @@ const EmbeddingSchema = z.object({
   provider: z.literal("openai"),
   model: z.string().default("text-embedding-3-small"),
   api_key: z.string().min(1),
-  dimensions: z.number().int().default(1536),
+  base_url: z.string().url().optional(),
+  dimensions: z.number().int().default(1024),
   batch_size: z.number().int().min(1).max(2048).default(500),
   requests_per_minute: z.number().int().min(1).default(3000),
 });
@@ -89,8 +91,9 @@ const ENV_MAPPINGS: EnvMapping[] = [
   { envKey: "LLM_PROVIDER", configPath: "llm.provider", type: "string" },
   { envKey: "LLM_MODEL", configPath: "llm.model", type: "string" },
   { envKey: "LLM_API_KEY", configPath: "llm.api_key", type: "string" },
+  { envKey: "LLM_BASE_URL", configPath: "llm.base_url", type: "string" },
   { envKey: "EMBEDDING_API_KEY", configPath: "embedding.api_key", type: "string" },
-  { envKey: "CHROMADB_PERSIST_DIR", configPath: "vector_store.persist_directory", type: "string" },
+  { envKey: "EMBEDDING_BASE_URL", configPath: "embedding.base_url", type: "string" },
   { envKey: "LOG_LEVEL", configPath: "agent.log_level", type: "string" },
   { envKey: "HEALTH_PORT", configPath: "agent.health_port", type: "number" },
 ];

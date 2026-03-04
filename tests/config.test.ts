@@ -144,7 +144,7 @@ describe("config", () => {
 
     // Embedding defaults
     expect(config.embedding.model).toBe("text-embedding-3-small");
-    expect(config.embedding.dimensions).toBe(1536);
+    expect(config.embedding.dimensions).toBe(1024);
   });
 
   it("should override meshimize.api_key from MESHIMIZE_API_KEY env var", () => {
