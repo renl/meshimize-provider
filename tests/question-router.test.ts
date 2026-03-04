@@ -123,7 +123,9 @@ describe("QuestionRouter", () => {
 
     resolveSecond!();
     await vi.waitFor(() => {
-      expect(stats[0].activeWorkers).toBe(0);
+      // Re-fetch stats — getStats() returns snapshots, not live refs
+      const updatedStats = router.getStats();
+      expect(updatedStats[0].activeWorkers).toBe(0);
     });
   });
 

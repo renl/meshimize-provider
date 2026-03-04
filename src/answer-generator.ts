@@ -43,6 +43,14 @@ const DEFAULT_SYSTEM_PROMPT_TEMPLATE =
   'You are an expert assistant for {group_name}. Answer questions using ONLY the provided context. If the context does not contain enough information to answer the question, say "I don\'t have enough information to answer that question based on the available documentation."\n\nAlways cite your sources by referencing the document name.';
 
 export class AnswerGenerator {
+  private llmClient: {
+    invoke: (messages: unknown[]) => Promise<{
+      content: unknown;
+      usage_metadata?: { input_tokens?: number; output_tokens?: number };
+    }>;
+  } | null = null;
+  private llmProvider: string | null = null;
+
   constructor(private readonly options: AnswerGeneratorOptions) {}
 
   async generate(
@@ -104,53 +112,42 @@ export class AnswerGenerator {
       try {
         const startMs = Date.now();
 
-        let llmResponse: { content: string; promptTokens: number; completionTokens: number };
-
-        if (provider === "openai") {
-          const { ChatOpenAI } = await import("@langchain/openai");
-          const llm = new ChatOpenAI({
-            openAIApiKey: api_key,
-            modelName: model,
-            maxTokens: max_tokens,
-            temperature,
-          });
-          const result = await llm.invoke([
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userMessage },
-          ]);
-          const tokenUsage = result.usage_metadata;
-          llmResponse = {
-            content: typeof result.content === "string" ? result.content : String(result.content),
-            promptTokens: tokenUsage?.input_tokens ?? estimateTokens(systemPrompt + userMessage),
-            completionTokens:
-              tokenUsage?.output_tokens ??
-              estimateTokens(
-                typeof result.content === "string" ? result.content : String(result.content),
-              ),
-          };
-        } else {
-          const { ChatAnthropic } = await import("@langchain/anthropic");
-          const llm = new ChatAnthropic({
-            anthropicApiKey: api_key,
-            modelName: model,
-            maxTokens: max_tokens,
-            temperature,
-          });
-          const result = await llm.invoke([
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userMessage },
-          ]);
-          const tokenUsage = result.usage_metadata;
-          llmResponse = {
-            content: typeof result.content === "string" ? result.content : String(result.content),
-            promptTokens: tokenUsage?.input_tokens ?? estimateTokens(systemPrompt + userMessage),
-            completionTokens:
-              tokenUsage?.output_tokens ??
-              estimateTokens(
-                typeof result.content === "string" ? result.content : String(result.content),
-              ),
-          };
+        // Lazy-initialize LLM client (reuse across generate() calls)
+        if (!this.llmClient || this.llmProvider !== provider) {
+          if (provider === "openai") {
+            const { ChatOpenAI } = await import("@langchain/openai");
+            this.llmClient = new ChatOpenAI({
+              openAIApiKey: api_key,
+              modelName: model,
+              maxTokens: max_tokens,
+              temperature,
+            }) as unknown as typeof this.llmClient;
+          } else {
+            const { ChatAnthropic } = await import("@langchain/anthropic");
+            this.llmClient = new ChatAnthropic({
+              anthropicApiKey: api_key,
+              modelName: model,
+              maxTokens: max_tokens,
+              temperature,
+            }) as unknown as typeof this.llmClient;
+          }
+          this.llmProvider = provider;
         }
+
+        const result = await this.llmClient!.invoke([
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ]);
+        const tokenUsage = result.usage_metadata;
+        const llmResponse = {
+          content: typeof result.content === "string" ? result.content : String(result.content),
+          promptTokens: tokenUsage?.input_tokens ?? estimateTokens(systemPrompt + userMessage),
+          completionTokens:
+            tokenUsage?.output_tokens ??
+            estimateTokens(
+              typeof result.content === "string" ? result.content : String(result.content),
+            ),
+        };
 
         const llmMs = Date.now() - startMs;
 

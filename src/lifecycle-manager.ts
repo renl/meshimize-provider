@@ -97,7 +97,11 @@ export class LifecycleManager {
       logger: this.logger,
     });
 
-    // 4. Create AnswerPoster (uses api_key as token for REST API)
+    // 4. Create AnswerPoster
+    // Auth: POST /groups/:id/messages uses the api_key_auth pipeline (APIKeyPlug),
+    // which authenticates via Authorization: Bearer <api_key>. This is correct —
+    // the server treats the Bearer token as an API key, not a session token.
+    // See Architecture Contract §6.1 (APIKeyPlug) and §4.5 Router (api_key_auth scope).
     this.answerPoster = new AnswerPoster({
       serverUrl: this.config.meshimize.server_url,
       token: this.config.meshimize.api_key,
@@ -177,8 +181,16 @@ export class LifecycleManager {
 
     this._started = true;
 
-    // 10. Start health summary timer
-    const summaryIntervalMs = this.config.agent.health_summary_interval_s * 1000;
+    // 10. Start health summary timer (clamp to minimum 10s to prevent tight loops)
+    const rawIntervalS = this.config.agent.health_summary_interval_s;
+    const clampedIntervalS = rawIntervalS > 0 ? Math.max(rawIntervalS, 10) : 60;
+    if (rawIntervalS !== clampedIntervalS) {
+      this.logger.warn(
+        { configured: rawIntervalS, using: clampedIntervalS },
+        "health_summary_interval_s clamped to safe minimum",
+      );
+    }
+    const summaryIntervalMs = clampedIntervalS * 1000;
     this.healthSummaryTimer = setInterval(() => {
       const stats = this.questionRouter?.getStats() ?? [];
       const totalAnswered = stats.reduce((sum, s) => sum + s.answeredCount, 0);

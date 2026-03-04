@@ -85,9 +85,12 @@ export class QuestionRouter {
     this.processNext(question.group_id);
   }
 
-  /** Get stats for all groups (for health endpoint) */
+  /** Get stats for all groups (for health endpoint). Returns snapshot copies (not live refs). */
   getStats(): GroupState[] {
-    return Array.from(this.groups.values());
+    return Array.from(this.groups.values()).map((group) => ({
+      ...group,
+      queue: [...group.queue],
+    }));
   }
 
   /** Drain: wait for in-flight work to complete (for shutdown) */

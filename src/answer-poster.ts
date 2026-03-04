@@ -67,7 +67,7 @@ export class AnswerPoster {
               dead_letter: true,
               question_id: answer.parent_message_id,
               group_id: groupId,
-              answer_type: answer.message_type,
+              message_type: answer.message_type,
               answer_content_length: answer.content.length,
               http_status: 429,
               error_message: "Rate limit retries exhausted",
@@ -77,7 +77,11 @@ export class AnswerPoster {
 
           const retryAfterRaw = response.headers.get("Retry-After");
           const parsedMs = retryAfterRaw ? parseInt(retryAfterRaw, 10) * 1000 : NaN;
-          const waitMs = Number.isFinite(parsedMs) && parsedMs > 0 ? parsedMs : 2000;
+          const MAX_RETRY_WAIT_MS = 30_000;
+          const waitMs =
+            Number.isFinite(parsedMs) && parsedMs > 0
+              ? Math.min(parsedMs, MAX_RETRY_WAIT_MS)
+              : 2000;
           this.options.logger.warn(
             { groupId, status: 429, retryAfterMs: waitMs, rateLimitRetry: rateLimitRetries },
             "Rate limited — waiting before retry",
@@ -97,7 +101,7 @@ export class AnswerPoster {
             dead_letter: true,
             question_id: answer.parent_message_id,
             group_id: groupId,
-            answer_type: answer.message_type,
+            message_type: answer.message_type,
             answer_content_length: answer.content.length,
             http_status: lastStatus,
             error_message: lastErrorText,
@@ -122,7 +126,7 @@ export class AnswerPoster {
             dead_letter: true,
             question_id: answer.parent_message_id,
             group_id: groupId,
-            answer_type: answer.message_type,
+            message_type: answer.message_type,
             answer_content_length: answer.content.length,
             http_status: lastStatus,
             error_message: lastErrorText,
