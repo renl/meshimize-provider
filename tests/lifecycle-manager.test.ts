@@ -30,10 +30,10 @@ vi.mock("../src/connection-manager.js", () => {
     static mockGetState = mockGetState;
 
     static resetAll(): void {
-      mockConnect.mockClear().mockResolvedValue(undefined);
-      mockJoinGroup.mockClear().mockResolvedValue(undefined);
-      mockDisconnect.mockClear().mockResolvedValue(undefined);
-      mockGetState.mockClear().mockReturnValue("disconnected");
+      mockConnect.mockReset().mockResolvedValue(undefined);
+      mockJoinGroup.mockReset().mockResolvedValue(undefined);
+      mockDisconnect.mockReset().mockResolvedValue(undefined);
+      mockGetState.mockReset().mockReturnValue("disconnected");
       MockConnectionManager.lastInstance = null;
       MockConnectionManager.lastOptions = null;
     }
@@ -179,11 +179,29 @@ function createMockConfig(groups?: GroupConfig[]): Config {
 describe("LifecycleManager", () => {
   beforeEach(() => {
     MockConnectionManager.resetAll();
-    mockNeedsIngestion.mockClear().mockResolvedValue(false);
-    mockIngest.mockClear();
-    mockRetrieve.mockClear();
-    mockGenerate.mockClear();
-    mockPost.mockClear();
+    // Use mockReset() (not mockClear()) so that changed implementations
+    // (e.g. .mockRejectedValue()) don't leak between tests, then re-apply defaults.
+    mockNeedsIngestion.mockReset().mockResolvedValue(false);
+    mockIngest.mockReset().mockResolvedValue({
+      groupId: "test",
+      groupName: "Test",
+      docCount: 5,
+      chunkCount: 20,
+      durationMs: 100,
+    });
+    mockRetrieve.mockReset().mockResolvedValue([]);
+    mockGenerate.mockReset().mockResolvedValue({
+      content: "Test answer",
+      answerType: "llm_answer",
+      promptTokens: 100,
+      completionTokens: 20,
+      llmMs: 500,
+    });
+    mockPost.mockReset().mockResolvedValue({
+      success: true,
+      httpStatus: 201,
+      deadLettered: false,
+    });
   });
 
   afterEach(() => {
