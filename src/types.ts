@@ -23,6 +23,7 @@ export interface OutgoingAnswer {
 export interface RetrievedChunk {
   content: string;
   source: string;
+  /** Raw distance from ChromaDB query (lower = more similar). Metric depends on collection config (cosine, l2, ip). */
   score: number;
 }
 

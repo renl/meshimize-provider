@@ -25,6 +25,19 @@ async function main(): Promise<void> {
   const configPath =
     cliArgs.find((arg) => !arg.startsWith("-")) || "config/meshimize-provider.yaml";
 
+  // ─── CLI command dispatch (before config loading / server startup) ───
+  if (cliArgs.includes("--ingest-only")) {
+    const { runIngestCommand } = await import("./commands/ingest-command.js");
+    await runIngestCommand(configPath);
+    return; // Command handles its own exit
+  }
+
+  if (cliArgs.includes("--validate")) {
+    const { runValidateCommand } = await import("./commands/validate-command.js");
+    await runValidateCommand(configPath);
+    return; // Command handles its own exit
+  }
+
   // Load and validate configuration
   let config: Config;
   try {
