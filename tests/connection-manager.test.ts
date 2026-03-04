@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   ConnectionManager,
   getReconnectDelay,
@@ -113,57 +113,13 @@ class MockWebSocket implements WebSocketLike {
   }
 }
 
-function createMockFetch(
-  authResponse?: Record<string, unknown>,
-  membersResponse?: Record<string, unknown>,
-): typeof globalThis.fetch & { calls: { url: string; init?: RequestInit }[] } {
-  const calls: { url: string; init?: RequestInit }[] = [];
-
-  const mockFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    calls.push({ url, init });
-
-    if (url.includes("/api/v1/auth/login")) {
-      return new Response(
-        JSON.stringify(
-          authResponse ?? {
-            data: {
-              token: "test-jwt-token",
-              account: { id: "account-123", display_name: "Test Agent" },
-            },
-          },
-        ),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }
-
-    if (url.includes("/api/v1/groups/") && url.includes("/members")) {
-      return new Response(
-        JSON.stringify(
-          membersResponse ?? {
-            data: [{ account_id: "account-123", role: "responder" }],
-          },
-        ),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }
-
-    return new Response("Not Found", { status: 404 });
-  }) as unknown as typeof globalThis.fetch & { calls: { url: string; init?: RequestInit }[] };
-
-  mockFetch.calls = calls;
-  return mockFetch;
-}
-
 function createConnectionManager(overrides?: Partial<ConnectionManagerOptions>): {
   cm: ConnectionManager;
   mockWs: MockWebSocket;
-  mockFetch: ReturnType<typeof createMockFetch>;
   stateChanges: ConnectionState[];
   questions: { question: IncomingQuestion; groupConfig: GroupConfig }[];
 } {
   const mockWs = new MockWebSocket();
-  const mockFetch = createMockFetch();
   const stateChanges: ConnectionState[] = [];
   const questions: { question: IncomingQuestion; groupConfig: GroupConfig }[] = [];
 
@@ -177,11 +133,10 @@ function createConnectionManager(overrides?: Partial<ConnectionManagerOptions>):
       stateChanges.push(state);
     },
     webSocketFactory: () => mockWs,
-    fetchFn: mockFetch,
     ...overrides,
   });
 
-  return { cm, mockWs, mockFetch, stateChanges, questions };
+  return { cm, mockWs, stateChanges, questions };
 }
 
 // ─── Tests ───
@@ -210,36 +165,38 @@ describe("getReconnectDelay", () => {
 
 describe("ConnectionManager", () => {
   // NOTE: Only tests that need timer control (reconnection, explicit disconnect check)
-  // use fake timers. Other tests use real timers to avoid blocking async fetch mocks.
+  // use fake timers. Other tests use real timers to avoid blocking async flows.
 
   it("should construct WebSocket URL with wss:// for https:// server_url", async () => {
-    const { cm, mockWs, mockFetch } = createConnectionManager();
+    const mockWs = new MockWebSocket();
+    let capturedUrl = "";
 
-    // connect() calls fetch (async), then creates WebSocket
-    // We need to let fetch resolve, then simulateOpen
+    const cm = new ConnectionManager({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+      onQuestion: () => {},
+      onConnectionStateChange: () => {},
+      webSocketFactory: (url) => {
+        capturedUrl = url;
+        return mockWs;
+      },
+    });
+
     const connectPromise = cm.connect();
-    // Wait a tick for the fetch promise to resolve, then the ws factory runs synchronously
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
-    // Check auth call was made with correct URL and headers
-    const authCall = mockFetch.calls.find((c) => c.url.includes("/api/v1/auth/login"));
-    expect(authCall).toBeDefined();
-    expect(authCall!.init?.method).toBe("POST");
-    expect(authCall!.init?.headers).toEqual(
-      expect.objectContaining({
-        "Content-Type": "application/json",
-        "x-api-key": "test-api-key-123",
-      }),
-    );
+    expect(capturedUrl).toMatch(/^wss:\/\//);
+    expect(capturedUrl).toContain("api.meshimize.com");
+    expect(capturedUrl).toContain("/socket/websocket");
+    expect(capturedUrl).toContain("token=test-api-key-123");
+    expect(capturedUrl).toContain("vsn=2.0.0");
   });
 
   it("should use ws:// for http:// server_url", async () => {
     const mockWs = new MockWebSocket();
     let capturedUrl = "";
 
-    const mockFetch = createMockFetch();
     const cm = new ConnectionManager({
       config: createMockConfig({
         meshimize: {
@@ -255,44 +212,48 @@ describe("ConnectionManager", () => {
         capturedUrl = url;
         return mockWs;
       },
-      fetchFn: mockFetch,
     });
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
     expect(capturedUrl).toMatch(/^ws:\/\//);
     expect(capturedUrl).toContain("localhost:4000");
     expect(capturedUrl).toContain("/socket/websocket");
-    expect(capturedUrl).toContain("token=test-jwt-token");
+    expect(capturedUrl).toContain("token=test-key");
   });
 
-  it("should make REST authentication call with correct headers and endpoint", async () => {
-    const { cm, mockWs, mockFetch } = createConnectionManager();
+  it("should connect WebSocket directly with API key as token (no REST calls)", async () => {
+    const mockWs = new MockWebSocket();
+    let capturedUrl = "";
+
+    const cm = new ConnectionManager({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+      onQuestion: () => {},
+      onConnectionStateChange: () => {},
+      webSocketFactory: (url) => {
+        capturedUrl = url;
+        return mockWs;
+      },
+    });
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
-    const authCall = mockFetch.calls[0];
-    expect(authCall.url).toBe("https://api.meshimize.com/api/v1/auth/login");
-    expect(authCall.init?.method).toBe("POST");
-    expect(authCall.init?.headers).toEqual(
-      expect.objectContaining({
-        "Content-Type": "application/json",
-        "x-api-key": "test-api-key-123",
-      }),
-    );
+    // Verify the API key is used directly as the token parameter
+    expect(capturedUrl).toContain("token=test-api-key-123");
+    // Verify no REST auth call was made — the URL should be a WebSocket URL, not HTTP
+    expect(capturedUrl).toMatch(/^wss?:\/\//);
+    expect(capturedUrl).not.toContain("/api/v1/auth/login");
   });
 
   it("should join channel with correct topic format (group:{group_id})", async () => {
     const { cm, mockWs } = createConnectionManager();
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
@@ -324,7 +285,6 @@ describe("ConnectionManager", () => {
     const { cm, mockWs, questions } = createConnectionManager();
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
@@ -371,7 +331,6 @@ describe("ConnectionManager", () => {
     let wsIndex = 0;
     const websockets = [mockWs1, mockWs2];
 
-    const mockFetch = createMockFetch();
     const stateChanges: ConnectionState[] = [];
 
     const cm = new ConnectionManager({
@@ -395,12 +354,10 @@ describe("ConnectionManager", () => {
         wsIndex++;
         return ws;
       },
-      fetchFn: mockFetch,
     });
 
-    // Initial connect — with fake timers, need advanceTimersByTimeAsync to flush microtasks
+    // Initial connect
     const connectPromise = cm.connect();
-    await vi.advanceTimersByTimeAsync(0); // flush fetch promise
     mockWs1.simulateOpen();
     await connectPromise;
 
@@ -413,9 +370,6 @@ describe("ConnectionManager", () => {
 
     // Advance timer by the first delay (100ms) — triggers reconnect setTimeout
     await vi.advanceTimersByTimeAsync(100);
-
-    // Flush the fetch promise from the reconnect attempt
-    await vi.advanceTimersByTimeAsync(0);
 
     // Second websocket should be created — simulate open
     mockWs2.simulateOpen();
@@ -436,10 +390,9 @@ describe("ConnectionManager", () => {
     expect(cm.getState()).toBe("disconnected");
 
     const connectPromise = cm.connect();
-    // fetch is async — state changes to "connecting" synchronously before fetch
+    // State changes to "connecting" synchronously
     expect(stateChanges[0]).toBe("connecting");
 
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
@@ -453,7 +406,6 @@ describe("ConnectionManager", () => {
     const { cm, mockWs, stateChanges } = createConnectionManager();
 
     const connectPromise = cm.connect();
-    await vi.advanceTimersByTimeAsync(0);
     mockWs.simulateOpen();
     await connectPromise;
 
@@ -485,43 +437,35 @@ describe("ConnectionManager", () => {
     vi.useRealTimers();
   });
 
-  it("should log WARN on role mismatch (non-blocking)", async () => {
-    const mockFetch = createMockFetch(undefined, {
-      data: [{ account_id: "account-123", role: "member" }],
-    });
+  it("should include API key as token in WebSocket URL", async () => {
     const mockWs = new MockWebSocket();
+    let capturedUrl = "";
 
+    const apiKey = "sk-provider-abc-xyz-789";
     const cm = new ConnectionManager({
-      config: createMockConfig(),
+      config: createMockConfig({
+        meshimize: {
+          server_url: "https://api.meshimize.com",
+          api_key: apiKey,
+          ws_path: "/socket/websocket",
+        },
+      }),
       logger: createMockLogger(),
       onQuestion: () => {},
       onConnectionStateChange: () => {},
-      webSocketFactory: () => mockWs,
-      fetchFn: mockFetch,
+      webSocketFactory: (url) => {
+        capturedUrl = url;
+        return mockWs;
+      },
     });
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
-    const group = createMockGroupConfig();
-    const joinPromise = cm.joinGroup(group);
-    const joinMsg = JSON.parse(mockWs.sentMessages[0]) as unknown[];
-    mockWs.simulateMessage([
-      joinMsg[0],
-      joinMsg[1],
-      `group:${group.group_id}`,
-      "phx_reply",
-      { status: "ok", response: {} },
-    ]);
-    await joinPromise;
-
-    // Let the role verification complete (non-blocking promise) — use a small delay
-    await new Promise((r) => setTimeout(r, 50));
-
-    // The test passes if joinGroup doesn't throw despite role mismatch
-    // The WARN log would be visible in a real logger
+    // Verify the API key is properly URL-encoded and used as token
+    expect(capturedUrl).toContain(`token=${encodeURIComponent(apiKey)}`);
+    expect(capturedUrl).toContain("vsn=2.0.0");
     expect(cm.getState()).toBe("connected");
   });
 
@@ -542,7 +486,6 @@ describe("ConnectionManager", () => {
     });
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
@@ -584,7 +527,6 @@ describe("ConnectionManager", () => {
     const { cm, mockWs } = createConnectionManager();
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
@@ -608,7 +550,6 @@ describe("ConnectionManager", () => {
     const { cm, mockWs, questions } = createConnectionManager();
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
     mockWs.simulateOpen();
     await connectPromise;
 
@@ -654,7 +595,6 @@ describe("ConnectionManager", () => {
     const { cm, mockWs } = createConnectionManager();
 
     const connectPromise = cm.connect();
-    await vi.advanceTimersByTimeAsync(0);
     mockWs.simulateOpen();
     await connectPromise;
 
@@ -669,14 +609,9 @@ describe("ConnectionManager", () => {
     vi.useRealTimers();
   });
 
-  it("should reset state to disconnected when auth fails", async () => {
+  it("should reset state to disconnected when WebSocket connection fails", async () => {
     const mockWs = new MockWebSocket();
     const stateChanges: ConnectionState[] = [];
-
-    // Create a fetch that returns 401
-    const failingFetch = vi.fn(async () => {
-      return new Response("Unauthorized", { status: 401 });
-    }) as unknown as typeof globalThis.fetch;
 
     const cm = new ConnectionManager({
       config: createMockConfig(),
@@ -686,17 +621,20 @@ describe("ConnectionManager", () => {
         stateChanges.push(state);
       },
       webSocketFactory: () => mockWs,
-      fetchFn: failingFetch,
     });
 
-    await expect(cm.connect()).rejects.toThrow("Authentication failed (401)");
+    const connectPromise = cm.connect();
+
+    // Simulate WebSocket error before connection established
+    mockWs.simulateError(new Error("Connection refused"));
+
+    await expect(connectPromise).rejects.toThrow("WebSocket connection failed");
     expect(cm.getState()).toBe("disconnected");
     expect(stateChanges).toEqual(["connecting", "disconnected"]);
   });
 
   it("should reject connect promise when socket closes before opening", async () => {
     const mockWs = new MockWebSocket();
-    const mockFetch = createMockFetch();
     const stateChanges: ConnectionState[] = [];
 
     const cm = new ConnectionManager({
@@ -707,11 +645,9 @@ describe("ConnectionManager", () => {
         stateChanges.push(state);
       },
       webSocketFactory: () => mockWs,
-      fetchFn: mockFetch,
     });
 
     const connectPromise = cm.connect();
-    await new Promise((r) => setTimeout(r, 0));
 
     // Socket closes before onopen fires
     mockWs.simulateClose();
@@ -728,7 +664,6 @@ describe("ConnectionManager", () => {
     let wsIndex = 0;
     const websockets = [mockWs1, mockWs2];
 
-    const mockFetch = createMockFetch();
     const questions: { question: IncomingQuestion; groupConfig: GroupConfig }[] = [];
 
     const cm = new ConnectionManager({
@@ -752,12 +687,10 @@ describe("ConnectionManager", () => {
         wsIndex++;
         return ws;
       },
-      fetchFn: mockFetch,
     });
 
     // 1. Initial connect
     const connectPromise = cm.connect();
-    await vi.advanceTimersByTimeAsync(0);
     mockWs1.simulateOpen();
     await connectPromise;
 
@@ -779,8 +712,6 @@ describe("ConnectionManager", () => {
 
     // 4. Advance timer to trigger reconnect (100ms delay)
     await vi.advanceTimersByTimeAsync(100);
-    // Flush fetch promise
-    await vi.advanceTimersByTimeAsync(0);
     // Simulate second WebSocket opening
     mockWs2.simulateOpen();
     await vi.advanceTimersByTimeAsync(0);
