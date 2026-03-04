@@ -1,0 +1,33 @@
+app = "meshimize-provider"
+primary_region = "iad"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  CHROMADB_PERSIST_DIR = "/data/chromadb"
+  LOG_LEVEL = "info"
+  HEALTH_PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[http_service.checks]]
+  grace_period = "120s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  timeout = "5s"
+
+[[mounts]]
+  source = "provider_data"
+  destination = "/data"
+  initial_size = "1"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

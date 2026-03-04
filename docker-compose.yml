@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+  agent:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+      - ./docs-source:/data/docs-source
+      - ./config:/app/config
+    env_file:
+      - .env
+    restart: unless-stopped
