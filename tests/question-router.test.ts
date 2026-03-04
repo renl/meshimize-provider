@@ -392,10 +392,11 @@ describe("QuestionRouter", () => {
     const logger = createMockLogger();
     const warnSpy = vi.spyOn(logger, "warn");
 
+    // Use the shared processQuestion mock so the assertion below is meaningful
     const router = new QuestionRouter({
       maxQueueDepth: 50,
       logger,
-      processQuestion: vi.fn().mockResolvedValue(undefined),
+      processQuestion,
     });
 
     router.registerGroup(group);
@@ -407,7 +408,7 @@ describe("QuestionRouter", () => {
     const lastCall = warnSpy.mock.calls[warnSpy.mock.calls.length - 1];
     expect(String(lastCall[1])).toContain("router is stopped");
 
-    // Verify processQuestion was NOT called
+    // Verify processQuestion was NOT called (now asserts on the same mock passed to the router)
     expect(processQuestion).not.toHaveBeenCalled();
   });
 

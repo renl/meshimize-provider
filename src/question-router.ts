@@ -154,8 +154,10 @@ export class QuestionRouter {
       "Processing question",
     );
 
-    this.options
-      .processQuestion(question, groupConfig)
+    // Wrap in Promise.resolve().then() to catch synchronous throws from processQuestion.
+    // Without this, a sync throw would bypass .catch/.finally, leaking activeWorkers.
+    Promise.resolve()
+      .then(() => this.options.processQuestion(question, groupConfig))
       .then(() => {
         const durationMs = Date.now() - startTime;
         group.answeredCount++;
