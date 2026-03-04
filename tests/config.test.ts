@@ -236,4 +236,22 @@ describe("config", () => {
       "Invalid configuration file: root YAML value must be a mapping/object.",
     );
   });
+
+  // ─── persist_directory URL scheme validation ───
+
+  it("should reject ftp:// URL for persist_directory", () => {
+    const cfg = validConfig();
+    cfg.vector_store = { persist_directory: "ftp://example.com:8000" };
+    const configPath = writeYamlConfig(tempDir, cfg);
+
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+
+  it("should reject file:// URL for persist_directory", () => {
+    const cfg = validConfig();
+    cfg.vector_store = { persist_directory: "file:///local/path" };
+    const configPath = writeYamlConfig(tempDir, cfg);
+
+    expect(() => loadConfig(configPath)).toThrow();
+  });
 });

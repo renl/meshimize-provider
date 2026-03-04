@@ -335,6 +335,25 @@ describe("rag-pipeline", () => {
     expect(chunks[1].score).toBeCloseTo(0.3, 5);
   });
 
+  it("should default to Infinity score when distances are missing", async () => {
+    mockQuery.mockResolvedValue({
+      ids: [["chunk_0"]],
+      documents: [["Some content"]],
+      metadatas: [[{ source: "file.md" }]],
+      distances: [[undefined]],
+    });
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const chunks = await pipeline.retrieve(group, "test query");
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].content).toBe("Some content");
+    expect(chunks[0].source).toBe("file.md");
+    expect(chunks[0].score).toBe(Infinity);
+  });
+
   // ─── needsIngestion ───
 
   it("should return true for missing collection", async () => {
@@ -360,6 +379,21 @@ describe("rag-pipeline", () => {
 
     const needs = await pipeline.needsIngestion(group);
     expect(needs).toBe(false);
+  });
+
+  it("should return true when ingested_at is an invalid date string", async () => {
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: "not-a-valid-date",
+      group_id: "test-group-id",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(true);
   });
 
   // ─── Empty directory ───

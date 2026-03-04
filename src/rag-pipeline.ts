@@ -370,6 +370,9 @@ export class RagPipeline {
       // Check staleness via collection metadata
       if (collection.metadata?.ingested_at) {
         const ingestedAt = new Date(collection.metadata.ingested_at as string);
+        if (isNaN(ingestedAt.getTime())) {
+          return true;
+        }
         const staleDays = this.options.staleDays;
         const now = new Date();
         const diffDays = (now.getTime() - ingestedAt.getTime()) / (1000 * 60 * 60 * 24);
@@ -422,7 +425,7 @@ export class RagPipeline {
         chunks.push({
           content: documents[i] ?? "",
           source: (metadatas[i]?.source as string) ?? "unknown",
-          score: distances[i] != null ? (distances[i] as number) : 0,
+          score: distances[i] != null ? (distances[i] as number) : Number.POSITIVE_INFINITY,
         });
       }
     }
