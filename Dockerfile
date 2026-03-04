@@ -19,7 +19,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install ChromaDB and supervisord via pip
-RUN pip3 install --break-system-packages chromadb supervisor
+RUN pip3 install --break-system-packages chromadb==1.5.2 supervisor==4.3.0
 
 COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts
@@ -43,7 +43,7 @@ logfile=/dev/null
 logfile_maxbytes=0
 
 [program:chromadb]
-command=chroma run --path /data/chromadb --host 0.0.0.0 --port 8000
+command=chroma run --path %(ENV_CHROMADB_PERSIST_DIR)s --host 127.0.0.1 --port 8000
 autostart=true
 autorestart=true
 stdout_logfile=/dev/stdout

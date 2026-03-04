@@ -199,6 +199,42 @@ describe("config", () => {
     }
   });
 
+  it("should override llm.base_url from LLM_BASE_URL env var", () => {
+    const originalEnv = process.env.LLM_BASE_URL;
+    try {
+      process.env.LLM_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.llm.base_url).toBe("https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.LLM_BASE_URL;
+      } else {
+        process.env.LLM_BASE_URL = originalEnv;
+      }
+    }
+  });
+
+  it("should override embedding.base_url from EMBEDDING_BASE_URL env var", () => {
+    const originalEnv = process.env.EMBEDDING_BASE_URL;
+    try {
+      process.env.EMBEDDING_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.embedding.base_url).toBe(
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      );
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.EMBEDDING_BASE_URL;
+      } else {
+        process.env.EMBEDDING_BASE_URL = originalEnv;
+      }
+    }
+  });
+
   it("should reject invalid llm.provider value", () => {
     const cfg = validConfig();
     (cfg.llm as Record<string, unknown>).provider = "invalid-provider";
