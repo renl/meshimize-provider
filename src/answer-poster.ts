@@ -54,11 +54,16 @@ export class AnswerPoster {
         lastStatus = response.status;
 
         if (response.ok) {
+          // Consume the response body so the underlying socket can be reused (Node/undici).
+          await response.body?.cancel();
           return { success: true, httpStatus: response.status, deadLettered: false };
         }
 
         // HTTP 429 — rate limited; read Retry-After, wait, retry (NOT counted as failure)
         if (response.status === 429) {
+          // Consume the response body before sleeping to free the socket for reuse.
+          await response.body?.cancel();
+
           rateLimitRetries++;
           if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
             // Exceeded max 429 retries — dead letter

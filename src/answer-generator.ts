@@ -11,6 +11,12 @@ export interface AnswerGeneratorOptions {
 
 export interface GeneratedAnswer {
   content: string;
+  /**
+   * `"llm_answer"` | `"no_context"` | `"error_fallback"` are returned by `generate()`.
+   * `"missed_content"` is set upstream by the question processing callback when the
+   * agent was offline and message content is unavailable (SQ-14 zero content persistence).
+   * It is never returned by `generate()` itself.
+   */
   answerType: "llm_answer" | "no_context" | "error_fallback" | "missed_content";
   promptTokens: number;
   completionTokens: number;
@@ -25,6 +31,11 @@ const NO_CONTEXT_TEMPLATE =
 const ERROR_FALLBACK_TEMPLATE =
   "I'm sorry, I encountered an error while processing your question. Please try again later.";
 
+/**
+ * Shown when the agent was offline and message content is no longer available
+ * due to SQ-14 zero content persistence. Set by the question processing callback
+ * (not by `generate()`). Exported so the lifecycle manager can use it.
+ */
 const MISSED_CONTENT_TEMPLATE =
   "I'm sorry, I was offline when your question was posted and the message content is no longer available. " +
   "Could you please re-post your question?";
