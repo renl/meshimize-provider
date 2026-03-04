@@ -28,27 +28,6 @@ interface PhoenixReplyPayload {
   response: Record<string, unknown>;
 }
 
-// ─── Auth Types ───
-
-interface AuthResponse {
-  data: {
-    token: string;
-    account: {
-      id: string;
-      display_name: string;
-    };
-  };
-}
-
-interface MemberInfo {
-  account_id: string;
-  role: string;
-}
-
-interface MembersResponse {
-  data: MemberInfo[];
-}
-
 // ─── WebSocket Abstraction (for testability) ───
 
 /** Minimal WebSocket interface matching the subset we use from the global WebSocket */
@@ -93,8 +72,6 @@ export interface ConnectionManagerOptions {
   onConnectionStateChange: (state: ConnectionState) => void;
   /** Override WebSocket constructor for testing */
   webSocketFactory?: WebSocketFactory;
-  /** Override fetch for testing */
-  fetchFn?: typeof globalThis.fetch;
 }
 
 export class ConnectionManager {
@@ -106,8 +83,6 @@ export class ConnectionManager {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private refCounter: number = 0;
   private pendingHeartbeatRef: string | null = null;
-  private token: string | null = null;
-  private accountId: string | null = null;
   private explicitDisconnect: boolean = false;
 
   private readonly config: Config;
@@ -115,7 +90,6 @@ export class ConnectionManager {
   private readonly onQuestion: ConnectionManagerOptions["onQuestion"];
   private readonly onConnectionStateChange: ConnectionManagerOptions["onConnectionStateChange"];
   private readonly webSocketFactory: WebSocketFactory;
-  private readonly fetchFn: typeof globalThis.fetch;
 
   // Pending join resolve/reject callbacks keyed by ref
   private pendingJoins: Map<string, { resolve: () => void; reject: (err: Error) => void }> =
@@ -128,56 +102,28 @@ export class ConnectionManager {
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.webSocketFactory =
       options.webSocketFactory ?? ((url: string) => new WebSocket(url) as WebSocketLike);
-    this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
   }
 
-  /** Authenticate via REST API, then connect WebSocket */
+  /** Connect WebSocket using API key as token */
   async connect(): Promise<void> {
     this.explicitDisconnect = false;
     this.setState("connecting");
 
     try {
-      // 1. REST authentication
+      // Build WebSocket URL — API key is passed as `token` param.
+      // The server's UserSocket.connect/3 authenticates via this token directly.
       const serverUrl = this.config.meshimize.server_url.replace(/\/$/, "");
-      const authUrl = `${serverUrl}/api/v1/auth/login`;
-
-      this.logger.info({ url: authUrl }, "Authenticating with Meshimize server");
-
-      const authResponse = await this.fetchFn(authUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.config.meshimize.api_key,
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!authResponse.ok) {
-        const errorText = await authResponse.text();
-        throw new Error(`Authentication failed (${authResponse.status}): ${errorText}`);
-      }
-
-      const authData = (await authResponse.json()) as AuthResponse;
-      this.token = authData.data.token;
-      this.accountId = authData.data.account.id;
-
-      this.logger.info(
-        { accountId: this.accountId, displayName: authData.data.account.display_name },
-        "Authenticated successfully",
-      );
-
-      // 2. Build WebSocket URL
       const wsProtocol = serverUrl.startsWith("https://") ? "wss://" : "ws://";
       const hostAndPath = serverUrl.replace(/^https?:\/\//, "");
       const wsPath = this.config.meshimize.ws_path;
-      const wsUrl = `${wsProtocol}${hostAndPath}${wsPath}?token=${encodeURIComponent(this.token!)}&vsn=2.0.0`;
+      const wsUrl = `${wsProtocol}${hostAndPath}${wsPath}?token=${encodeURIComponent(this.config.meshimize.api_key)}&vsn=2.0.0`;
 
+      this.logger.info("Connecting WebSocket to Meshimize server");
       this.logger.debug(
         { wsUrl: wsUrl.replace(/token=[^&]+/, "token=[REDACTED]") },
-        "Connecting WebSocket",
+        "WebSocket URL",
       );
 
-      // 3. Create and connect WebSocket
       await this.connectWebSocket(wsUrl);
     } catch (err) {
       this.setState("disconnected");
@@ -283,14 +229,6 @@ export class ConnectionManager {
 
       channelState.joined = true;
       this.logger.info({ topic, groupName: group.group_name }, "Channel joined successfully");
-
-      // Role verification (non-blocking)
-      this.verifyRole(group).catch((err) => {
-        this.logger.warn(
-          { err, groupId: group.group_id },
-          "Role verification failed (non-blocking)",
-        );
-      });
     } catch (err) {
       // Remove stale channel entry on join failure
       this.channels.delete(topic);
@@ -333,8 +271,6 @@ export class ConnectionManager {
       this.socket = null;
     }
 
-    this.token = null;
-    this.accountId = null;
     this.setState("disconnected");
     this.logger.info("Disconnected from Meshimize server");
   }
@@ -560,52 +496,6 @@ export class ConnectionManager {
           "Failed to re-join channel after reconnect",
         );
       }
-    }
-  }
-
-  /** Verify the agent has responder/owner role in the group (non-blocking) */
-  private async verifyRole(group: GroupConfig): Promise<void> {
-    if (!this.token || !this.accountId) return;
-
-    const serverUrl = this.config.meshimize.server_url.replace(/\/$/, "");
-    const membersUrl = `${serverUrl}/api/v1/groups/${group.group_id}/members`;
-
-    const response = await this.fetchFn(membersUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-      },
-    });
-
-    if (!response.ok) {
-      this.logger.warn(
-        { groupId: group.group_id, status: response.status },
-        "Failed to fetch group members for role verification",
-      );
-      return;
-    }
-
-    const membersData = (await response.json()) as MembersResponse;
-    const agentMember = membersData.data.find((m) => m.account_id === this.accountId);
-
-    if (!agentMember) {
-      this.logger.warn(
-        { groupId: group.group_id, accountId: this.accountId },
-        "Agent not found in group members list",
-      );
-      return;
-    }
-
-    if (agentMember.role !== "responder" && agentMember.role !== "owner") {
-      this.logger.warn(
-        { groupId: group.group_id, role: agentMember.role, accountId: this.accountId },
-        "Agent does not have responder or owner role in group",
-      );
-    } else {
-      this.logger.debug(
-        { groupId: group.group_id, role: agentMember.role },
-        "Role verification passed",
-      );
     }
   }
 }
