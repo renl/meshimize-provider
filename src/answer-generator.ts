@@ -40,7 +40,8 @@ function estimateTokens(text: string): number {
 // ─── Default System Prompt ───
 
 const DEFAULT_SYSTEM_PROMPT_TEMPLATE =
-  'You are an expert assistant for {group_name}. Answer questions using ONLY the provided context. If the context does not contain enough information to answer the question, say "I don\'t have enough information to answer that question based on the available documentation."\n\nAlways cite your sources by referencing the document name.';
+  `You are an expert assistant for {group_name}. Answer questions using ONLY the provided context. If the context does not contain enough information to answer the question, say "${NO_CONTEXT_TEMPLATE}"` +
+  "\n\nAlways cite your sources by referencing the document name.";
 
 export class AnswerGenerator {
   private llmClient: {

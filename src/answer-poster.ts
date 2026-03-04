@@ -62,16 +62,18 @@ export class AnswerPoster {
           rateLimitRetries++;
           if (rateLimitRetries > MAX_RATE_LIMIT_RETRIES) {
             // Exceeded max 429 retries — dead letter
-            this.options.logger.error({
-              msg: "DEAD_LETTER: Rate limit retries exhausted",
-              dead_letter: true,
-              question_id: answer.parent_message_id,
-              group_id: groupId,
-              message_type: answer.message_type,
-              answer_content_length: answer.content.length,
-              http_status: 429,
-              error_message: "Rate limit retries exhausted",
-            });
+            this.options.logger.error(
+              {
+                deadLetter: true,
+                questionId: answer.parent_message_id,
+                groupId,
+                messageType: answer.message_type,
+                answerContentLength: answer.content.length,
+                httpStatus: 429,
+                errorMessage: "Rate limit retries exhausted",
+              },
+              "DEAD_LETTER: Rate limit retries exhausted",
+            );
             return { success: false, httpStatus: 429, deadLettered: true };
           }
 
@@ -96,16 +98,18 @@ export class AnswerPoster {
 
         if (failureCount >= 2) {
           // Dead letter
-          this.options.logger.error({
-            msg: "DEAD_LETTER: Answer post failed after retry",
-            dead_letter: true,
-            question_id: answer.parent_message_id,
-            group_id: groupId,
-            message_type: answer.message_type,
-            answer_content_length: answer.content.length,
-            http_status: lastStatus,
-            error_message: lastErrorText,
-          });
+          this.options.logger.error(
+            {
+              deadLetter: true,
+              questionId: answer.parent_message_id,
+              groupId,
+              messageType: answer.message_type,
+              answerContentLength: answer.content.length,
+              httpStatus: lastStatus,
+              errorMessage: lastErrorText,
+            },
+            "DEAD_LETTER: Answer post failed after retry",
+          );
           return { success: false, httpStatus: lastStatus, deadLettered: true };
         }
 
@@ -121,16 +125,18 @@ export class AnswerPoster {
         failureCount++;
 
         if (failureCount >= 2) {
-          this.options.logger.error({
-            msg: "DEAD_LETTER: Answer post failed after retry",
-            dead_letter: true,
-            question_id: answer.parent_message_id,
-            group_id: groupId,
-            message_type: answer.message_type,
-            answer_content_length: answer.content.length,
-            http_status: lastStatus,
-            error_message: lastErrorText,
-          });
+          this.options.logger.error(
+            {
+              deadLetter: true,
+              questionId: answer.parent_message_id,
+              groupId,
+              messageType: answer.message_type,
+              answerContentLength: answer.content.length,
+              httpStatus: lastStatus,
+              errorMessage: lastErrorText,
+            },
+            "DEAD_LETTER: Answer post failed after retry",
+          );
           return { success: false, httpStatus: lastStatus, deadLettered: true };
         }
 

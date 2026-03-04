@@ -128,13 +128,14 @@ describe("AnswerPoster", () => {
     expect(result).toEqual({ success: false, httpStatus: 502, deadLettered: true });
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
-    // Verify DEAD_LETTER log
+    // Verify DEAD_LETTER log — pino pattern: logger.error(obj, "message")
     expect(errorSpy).toHaveBeenCalled();
     const errorCall = errorSpy.mock.calls[0][0] as Record<string, unknown>;
-    expect(errorCall.dead_letter).toBe(true);
-    expect(errorCall.msg).toContain("DEAD_LETTER");
-    expect(errorCall.group_id).toBe("group-abc");
-    expect(errorCall.question_id).toBe("msg-001");
+    const errorMsg = errorSpy.mock.calls[0][1] as string;
+    expect(errorCall.deadLetter).toBe(true);
+    expect(errorMsg).toContain("DEAD_LETTER");
+    expect(errorCall.groupId).toBe("group-abc");
+    expect(errorCall.questionId).toBe("msg-001");
   });
 
   it("should handle HTTP 429 with Retry-After header — wait and retry (not counted as failure)", async () => {
@@ -283,7 +284,7 @@ describe("AnswerPoster", () => {
     expect(errorSpy).toHaveBeenCalled();
     const errorCalls = errorSpy.mock.calls;
     const deadLetterCall = errorCalls.find(
-      (c) => (c[0] as Record<string, unknown>)?.dead_letter === true,
+      (c) => (c[0] as Record<string, unknown>)?.deadLetter === true,
     );
     expect(deadLetterCall).toBeDefined();
   });
