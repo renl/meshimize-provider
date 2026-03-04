@@ -52,6 +52,7 @@ export class LifecycleManager {
       embeddingApiKey: this.config.embedding.api_key,
       embeddingModel: this.config.embedding.model,
       embeddingDimensions: this.config.embedding.dimensions,
+      embeddingBaseUrl: this.config.embedding.base_url,
       batchSize: this.config.embedding.batch_size,
       requestsPerMinute: this.config.embedding.requests_per_minute,
       logger: this.logger,

@@ -117,7 +117,7 @@ export class AnswerGenerator {
     const userMessage = `Context:\n---\n${context}\n---\n\nQuestion: ${question}`;
 
     // 5. Call LLM with retry
-    const { provider, model, api_key, max_tokens, temperature } = this.options.config.llm;
+    const { provider, model, api_key, base_url, max_tokens, temperature } = this.options.config.llm;
 
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -133,6 +133,7 @@ export class AnswerGenerator {
               modelName: model,
               maxTokens: max_tokens,
               temperature,
+              ...(base_url ? { configuration: { baseURL: base_url } } : {}),
             }) as unknown as typeof this.llmClient;
           } else {
             const { ChatAnthropic } = await import("@langchain/anthropic");

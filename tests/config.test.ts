@@ -144,7 +144,7 @@ describe("config", () => {
 
     // Embedding defaults
     expect(config.embedding.model).toBe("text-embedding-3-small");
-    expect(config.embedding.dimensions).toBe(1536);
+    expect(config.embedding.dimensions).toBe(1024);
   });
 
   it("should override meshimize.api_key from MESHIMIZE_API_KEY env var", () => {
@@ -195,6 +195,42 @@ describe("config", () => {
         delete process.env.LOG_LEVEL;
       } else {
         process.env.LOG_LEVEL = originalEnv;
+      }
+    }
+  });
+
+  it("should override llm.base_url from LLM_BASE_URL env var", () => {
+    const originalEnv = process.env.LLM_BASE_URL;
+    try {
+      process.env.LLM_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.llm.base_url).toBe("https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.LLM_BASE_URL;
+      } else {
+        process.env.LLM_BASE_URL = originalEnv;
+      }
+    }
+  });
+
+  it("should override embedding.base_url from EMBEDDING_BASE_URL env var", () => {
+    const originalEnv = process.env.EMBEDDING_BASE_URL;
+    try {
+      process.env.EMBEDDING_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.embedding.base_url).toBe(
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      );
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.EMBEDDING_BASE_URL;
+      } else {
+        process.env.EMBEDDING_BASE_URL = originalEnv;
       }
     }
   });
