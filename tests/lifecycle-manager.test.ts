@@ -152,7 +152,7 @@ function createMockConfig(groups?: GroupConfig[]): Config {
       model: "text-embedding-v4",
       api_key: "test-embed-key",
       dimensions: 1536,
-      batch_size: 500,
+      batch_size: 10,
       requests_per_minute: 3000,
     },
     vector_store: {

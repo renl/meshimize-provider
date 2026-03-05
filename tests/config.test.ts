@@ -286,6 +286,24 @@ describe("config", () => {
     }
   });
 
+  it("should override embedding.batch_size from EMBEDDING_BATCH_SIZE env var", () => {
+    const originalEnv = process.env.EMBEDDING_BATCH_SIZE;
+    try {
+      process.env.EMBEDDING_BATCH_SIZE = "256";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.embedding.batch_size).toBe(256);
+      expect(typeof config.embedding.batch_size).toBe("number");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.EMBEDDING_BATCH_SIZE;
+      } else {
+        process.env.EMBEDDING_BATCH_SIZE = originalEnv;
+      }
+    }
+  });
+
   it("should reject invalid llm.provider value", () => {
     const cfg = validConfig();
     (cfg.llm as Record<string, unknown>).provider = "invalid-provider";
