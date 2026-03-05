@@ -3,6 +3,7 @@
 import type pino from "pino";
 import type { Config } from "./config.js";
 import type { ConnectionState } from "./types.js";
+import { ChromaClient } from "chromadb";
 import { ConnectionManager } from "./connection-manager.js";
 import type { ConnectionManagerOptions } from "./connection-manager.js";
 import { RagPipeline } from "./rag-pipeline.js";
@@ -14,6 +15,8 @@ export interface LifecycleManagerOptions {
   config: Config;
   logger: pino.Logger;
   version: string;
+  chromaDbMaxRetries?: number;
+  chromaDbInitialDelayMs?: number;
 }
 
 export class LifecycleManager {
@@ -29,16 +32,73 @@ export class LifecycleManager {
   private readonly config: Config;
   private readonly logger: pino.Logger;
   private readonly version: string;
+  private readonly chromaDbMaxRetries: number;
+  private readonly chromaDbInitialDelayMs: number;
 
   constructor(options: LifecycleManagerOptions) {
     this.config = options.config;
     this.logger = options.logger;
     this.version = options.version;
+    const maxRetries = options.chromaDbMaxRetries ?? 10;
+    const initialDelayMs = options.chromaDbInitialDelayMs ?? 1000;
+    this.chromaDbMaxRetries = Math.max(1, maxRetries);
+    this.chromaDbInitialDelayMs = Math.max(0, initialDelayMs);
+  }
+
+  /** Wait for ChromaDB to become reachable before proceeding with ingestion. */
+  private async waitForChromaDb(maxRetries = 10, initialDelayMs = 1000): Promise<boolean> {
+    const client = new ChromaClient({ path: this.config.vector_store.persist_directory });
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const heartbeatWithTimeout = Promise.race([
+          client.heartbeat(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("ChromaDB heartbeat timeout (5s)")), 5000),
+          ),
+        ]);
+        await heartbeatWithTimeout;
+        this.logger.info({ attempt }, "ChromaDB is ready");
+        return true;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxRetries) {
+          const delayMs = initialDelayMs * attempt; // linear backoff: 1s, 2s, 3s, ...
+          this.logger.info(
+            {
+              attempt,
+              maxRetries,
+              nextRetryMs: delayMs,
+              error: error instanceof Error ? { message: error.message, name: error.name } : error,
+            },
+            "Waiting for ChromaDB...",
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+    this.logger.error(
+      {
+        maxRetries,
+        lastError:
+          lastError instanceof Error
+            ? { message: lastError.message, name: lastError.name }
+            : lastError,
+      },
+      "ChromaDB failed to become ready after all retries",
+    );
+    return false;
   }
 
   /** Start: ingest if needed, connect to server, join all groups, wire pipeline */
   async start(): Promise<void> {
     this.logger.info({ version: this.version }, "LifecycleManager starting");
+
+    // 0. Wait for ChromaDB to become reachable
+    const chromaReady = await this.waitForChromaDb(
+      this.chromaDbMaxRetries,
+      this.chromaDbInitialDelayMs,
+    );
 
     // Track groups that failed ingestion
     const ingestionFailedGroupIds = new Set<string>();
@@ -59,36 +119,43 @@ export class LifecycleManager {
     });
 
     // 2. For each group: check needsIngestion() → ingest if needed
-    for (const group of this.config.groups) {
-      try {
-        const needs = await this.ragPipeline.needsIngestion(group);
-        if (needs) {
-          this.logger.info(
-            { groupId: group.group_id, groupName: group.group_name },
-            "Ingesting documents for group",
-          );
-          const result = await this.ragPipeline.ingest(group);
-          this.logger.info(
-            {
-              groupId: group.group_id,
-              docCount: result.docCount,
-              chunkCount: result.chunkCount,
-              durationMs: result.durationMs,
-            },
-            "Ingestion complete",
-          );
-        } else {
-          this.logger.info(
-            { groupId: group.group_id, groupName: group.group_name },
-            "Corpus is fresh — skipping ingestion",
+    if (chromaReady) {
+      for (const group of this.config.groups) {
+        try {
+          const needs = await this.ragPipeline.needsIngestion(group);
+          if (needs) {
+            this.logger.info(
+              { groupId: group.group_id, groupName: group.group_name },
+              "Ingesting documents for group",
+            );
+            const result = await this.ragPipeline.ingest(group);
+            this.logger.info(
+              {
+                groupId: group.group_id,
+                docCount: result.docCount,
+                chunkCount: result.chunkCount,
+                durationMs: result.durationMs,
+              },
+              "Ingestion complete",
+            );
+          } else {
+            this.logger.info(
+              { groupId: group.group_id, groupName: group.group_name },
+              "Corpus is fresh — skipping ingestion",
+            );
+          }
+        } catch (err) {
+          ingestionFailedGroupIds.add(group.group_id);
+          this.logger.error(
+            { err, groupId: group.group_id, groupName: group.group_name },
+            "Ingestion failed for group",
           );
         }
-      } catch (err) {
+      }
+    } else {
+      this.logger.warn("ChromaDB not ready — skipping ingestion for all groups");
+      for (const group of this.config.groups) {
         ingestionFailedGroupIds.add(group.group_id);
-        this.logger.error(
-          { err, groupId: group.group_id, groupName: group.group_name },
-          "Ingestion failed for group",
-        );
       }
     }
 

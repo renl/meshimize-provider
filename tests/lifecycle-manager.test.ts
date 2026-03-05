@@ -66,6 +66,16 @@ vi.mock("../src/rag-pipeline.js", () => ({
   })),
 }));
 
+// ─── Mock ChromaDB (for waitForChromaDb readiness loop) ───
+
+const mockHeartbeat = vi.fn().mockResolvedValue({ "nanosecond heartbeat": 1234567890 });
+
+vi.mock("chromadb", () => ({
+  ChromaClient: vi.fn().mockImplementation(() => ({
+    heartbeat: mockHeartbeat,
+  })),
+}));
+
 // ─── Mock AnswerGenerator ───
 
 const mockGenerate = vi.fn().mockResolvedValue({
@@ -202,6 +212,7 @@ describe("LifecycleManager", () => {
       httpStatus: 201,
       deadLettered: false,
     });
+    mockHeartbeat.mockReset().mockResolvedValue({ "nanosecond heartbeat": 1234567890 });
   });
 
   afterEach(() => {
@@ -399,6 +410,82 @@ describe("LifecycleManager", () => {
     const router = lm.getQuestionRouter()!;
     const stats = router.getStats();
     expect(stats[0].status).toBe("degraded");
+
+    await lm.shutdown();
+  });
+
+  it("should wait for ChromaDB readiness before ingestion", async () => {
+    // ChromaDB fails twice, then succeeds
+    mockHeartbeat
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockResolvedValueOnce({ "nanosecond heartbeat": 1234567890 });
+
+    mockNeedsIngestion.mockResolvedValue(true);
+
+    const lm = new LifecycleManager({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+      version: "0.1.0",
+      chromaDbMaxRetries: 10,
+      chromaDbInitialDelayMs: 0,
+    });
+
+    await lm.start();
+
+    // Heartbeat called 3 times (2 failures + 1 success)
+    expect(mockHeartbeat).toHaveBeenCalledTimes(3);
+    // Ingestion should still proceed after ChromaDB becomes ready
+    expect(mockNeedsIngestion).toHaveBeenCalledTimes(1);
+    expect(mockIngest).toHaveBeenCalledTimes(1);
+
+    await lm.shutdown();
+  });
+
+  it("should skip ingestion and mark groups degraded when ChromaDB never becomes ready", async () => {
+    // ChromaDB never responds — fail all retries
+    mockHeartbeat.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const group = createMockGroupConfig();
+    const lm = new LifecycleManager({
+      config: createMockConfig([group]),
+      logger: createMockLogger(),
+      version: "0.1.0",
+      chromaDbMaxRetries: 10,
+      chromaDbInitialDelayMs: 0,
+    });
+
+    await lm.start();
+
+    // Heartbeat called maxRetries (10) times
+    expect(mockHeartbeat).toHaveBeenCalledTimes(10);
+    // Ingestion should NOT have been attempted
+    expect(mockNeedsIngestion).not.toHaveBeenCalled();
+    expect(mockIngest).not.toHaveBeenCalled();
+
+    // Group should be degraded
+    const router = lm.getQuestionRouter()!;
+    const stats = router.getStats();
+    expect(stats[0].status).toBe("degraded");
+
+    await lm.shutdown();
+  });
+
+  it("should succeed on first heartbeat without retries", async () => {
+    // ChromaDB ready immediately
+    mockHeartbeat.mockResolvedValueOnce({ "nanosecond heartbeat": 1234567890 });
+
+    const lm = new LifecycleManager({
+      config: createMockConfig(),
+      logger: createMockLogger(),
+      version: "0.1.0",
+      chromaDbMaxRetries: 10,
+      chromaDbInitialDelayMs: 0,
+    });
+
+    await lm.start();
+
+    expect(mockHeartbeat).toHaveBeenCalledTimes(1);
 
     await lm.shutdown();
   });
