@@ -248,11 +248,14 @@ export class RagPipeline {
       await this.client.deleteCollection({ name: collectionName });
     } catch (error: unknown) {
       // ChromaDB may throw ChromaNotFoundError which may not pass instanceof Error, so duck-type by name/message
-      const errObj = error as { name?: string; message?: string };
-      const isNotFound =
-        errObj.name === "ChromaNotFoundError" ||
-        (typeof errObj.message === "string" &&
-          (errObj.message.includes("does not exist") || errObj.message.includes("not found")));
+      let isNotFound = false;
+      if (typeof error === "object" && error !== null) {
+        const errObj = error as { name?: string; message?: string };
+        isNotFound =
+          errObj.name === "ChromaNotFoundError" ||
+          (typeof errObj.message === "string" &&
+            (errObj.message.includes("does not exist") || errObj.message.includes("not found")));
+      }
       if (!isNotFound) {
         this.options.logger.warn(
           { err: error, collectionName },

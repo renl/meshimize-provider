@@ -432,6 +432,16 @@ describe("rag-pipeline", () => {
     expect(result.docCount).toBe(1);
   });
 
+  it("should rethrow null thrown from deleteCollection without TypeError", async () => {
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nSome content.");
+    mockDeleteCollection.mockRejectedValue(null);
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    await expect(pipeline.ingest(group)).rejects.toBeNull();
+  });
+
   // ─── group_id mismatch ───
 
   it("should return true from needsIngestion when group_id mismatches", async () => {
