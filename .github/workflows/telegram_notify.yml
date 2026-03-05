@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [opened, closed]
     branches:
-      - main # Only trigger for PRs targeting your main branch
+      - main
 
 jobs:
   notify:
@@ -15,13 +15,13 @@ jobs:
         with:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
-          format: markdown
+          format: html
           message: |
-            *GitHub Action Alert* 🚀
+            <b>GitHub Action Alert</b> 🚀
 
-            ${{ github.event.pull_request.merged == true && '✅ **PR Merged**' || '📩 **New PR Opened**' }}
+            ${{ github.event.pull_request.merged == true && '✅ <b>PR Merged</b>' || '📩 <b>New PR Opened</b>' }}
 
-            *Repo:* ${{ github.repository }}
-            *PR Title:* ${{ github.event.pull_request.title }}
-            *Author:* ${{ github.actor }}
-            *Link:* [View Pull Request](${{ github.event.pull_request.html_url }})
+            <b>Repo:</b> ${{ github.repository }}
+            <b>PR Title:</b> ${{ github.event.pull_request.title }}
+            <b>Author:</b> ${{ github.actor }}
+            <b>Link:</b> <a href="${{ github.event.pull_request.html_url }}">View Pull Request</a>
