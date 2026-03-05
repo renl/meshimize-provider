@@ -33,7 +33,7 @@ const LLMSchema = z.object({
 
 const EmbeddingSchema = z.object({
   provider: z.literal("openai"),
-  model: z.string().default("text-embedding-3-small"),
+  model: z.string().default("text-embedding-v4"),
   api_key: z.string().min(1),
   base_url: z.string().url().optional(),
   dimensions: z.number().int().default(1024),
@@ -93,6 +93,7 @@ const ENV_MAPPINGS: EnvMapping[] = [
   { envKey: "LLM_API_KEY", configPath: "llm.api_key", type: "string" },
   { envKey: "LLM_BASE_URL", configPath: "llm.base_url", type: "string" },
   { envKey: "EMBEDDING_API_KEY", configPath: "embedding.api_key", type: "string" },
+  { envKey: "EMBEDDING_MODEL", configPath: "embedding.model", type: "string" },
   { envKey: "EMBEDDING_BASE_URL", configPath: "embedding.base_url", type: "string" },
   { envKey: "LOG_LEVEL", configPath: "agent.log_level", type: "string" },
   { envKey: "HEALTH_PORT", configPath: "agent.health_port", type: "number" },
@@ -119,6 +120,22 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
   }
 }
 
+function applyGroupEnvOverrides(config: Record<string, unknown>): void {
+  const groups = config.groups;
+  if (!Array.isArray(groups) || groups.length === 0) return;
+  const first = groups[0] as Record<string, unknown>;
+
+  const groupId = process.env.GROUP_ID;
+  if (groupId !== undefined) {
+    first.group_id = groupId;
+  }
+
+  const groupName = process.env.GROUP_NAME;
+  if (groupName !== undefined) {
+    first.group_name = groupName;
+  }
+}
+
 export function loadConfig(configPath: string): Config {
   const raw = readFileSync(configPath, "utf-8");
   const parsed = parseYaml(raw);
@@ -129,6 +146,7 @@ export function loadConfig(configPath: string): Config {
 
   // Apply env var overrides (highest priority)
   applyEnvOverrides(configObject);
+  applyGroupEnvOverrides(configObject);
 
   // Validate with Zod
   return ConfigSchema.parse(configObject);

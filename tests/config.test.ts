@@ -31,7 +31,7 @@ function validConfig(): Record<string, unknown> {
     },
     llm: {
       provider: "openai",
-      model: "gpt-4o-mini",
+      model: "qwen3.5-flash",
       api_key: "test-llm-key",
     },
     embedding: {
@@ -143,7 +143,7 @@ describe("config", () => {
     expect(config.groups[0].top_k).toBe(5);
 
     // Embedding defaults
-    expect(config.embedding.model).toBe("text-embedding-3-small");
+    expect(config.embedding.model).toBe("text-embedding-v4");
     expect(config.embedding.dimensions).toBe(1024);
   });
 
@@ -231,6 +231,57 @@ describe("config", () => {
         delete process.env.EMBEDDING_BASE_URL;
       } else {
         process.env.EMBEDDING_BASE_URL = originalEnv;
+      }
+    }
+  });
+
+  it("should override embedding.model from EMBEDDING_MODEL env var", () => {
+    const originalEnv = process.env.EMBEDDING_MODEL;
+    try {
+      process.env.EMBEDDING_MODEL = "text-embedding-v3";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.embedding.model).toBe("text-embedding-v3");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.EMBEDDING_MODEL;
+      } else {
+        process.env.EMBEDDING_MODEL = originalEnv;
+      }
+    }
+  });
+
+  it("should override groups[0].group_id from GROUP_ID env var", () => {
+    const originalEnv = process.env.GROUP_ID;
+    try {
+      process.env.GROUP_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.groups[0].group_id).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.GROUP_ID;
+      } else {
+        process.env.GROUP_ID = originalEnv;
+      }
+    }
+  });
+
+  it("should override groups[0].group_name from GROUP_NAME env var", () => {
+    const originalEnv = process.env.GROUP_NAME;
+    try {
+      process.env.GROUP_NAME = "Overridden Group";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.groups[0].group_name).toBe("Overridden Group");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.GROUP_NAME;
+      } else {
+        process.env.GROUP_NAME = originalEnv;
       }
     }
   });
