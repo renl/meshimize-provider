@@ -39,30 +39,48 @@ export class LifecycleManager {
     this.config = options.config;
     this.logger = options.logger;
     this.version = options.version;
-    this.chromaDbMaxRetries = options.chromaDbMaxRetries ?? 10;
-    this.chromaDbInitialDelayMs = options.chromaDbInitialDelayMs ?? 1000;
+    const maxRetries = options.chromaDbMaxRetries ?? 10;
+    const initialDelayMs = options.chromaDbInitialDelayMs ?? 1000;
+    this.chromaDbMaxRetries = Math.max(1, maxRetries);
+    this.chromaDbInitialDelayMs = Math.max(1, initialDelayMs);
   }
 
   /** Wait for ChromaDB to become reachable before proceeding with ingestion. */
   private async waitForChromaDb(maxRetries = 10, initialDelayMs = 1000): Promise<boolean> {
     const client = new ChromaClient({ path: this.config.vector_store.persist_directory });
+    let lastError: unknown;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         await client.heartbeat();
         this.logger.info({ attempt }, "ChromaDB is ready");
         return true;
-      } catch {
+      } catch (error) {
+        lastError = error;
         if (attempt < maxRetries) {
           const delayMs = initialDelayMs * attempt; // linear backoff: 1s, 2s, 3s, ...
           this.logger.info(
-            { attempt, maxRetries, nextRetryMs: delayMs },
+            {
+              attempt,
+              maxRetries,
+              nextRetryMs: delayMs,
+              error: error instanceof Error ? { message: error.message, name: error.name } : error,
+            },
             "Waiting for ChromaDB...",
           );
           await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
       }
     }
-    this.logger.error({ maxRetries }, "ChromaDB failed to become ready after all retries");
+    this.logger.error(
+      {
+        maxRetries,
+        lastError:
+          lastError instanceof Error
+            ? { message: lastError.message, name: lastError.name }
+            : lastError,
+      },
+      "ChromaDB failed to become ready after all retries",
+    );
     return false;
   }
 
