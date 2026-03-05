@@ -134,7 +134,7 @@ function createTestOptions(overrides?: Partial<RagPipelineOptions>): RagPipeline
     embeddingApiKey: "test-key",
     embeddingModel: "text-embedding-v4",
     embeddingDimensions: 1536,
-    batchSize: 500,
+    batchSize: 10,
     requestsPerMinute: 3000,
     logger: createTestLogger(),
     ...overrides,
