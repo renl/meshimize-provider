@@ -142,14 +142,14 @@ function createMockConfig(groups?: GroupConfig[]): Config {
     },
     llm: {
       provider: "openai",
-      model: "gpt-4o-mini",
+      model: "qwen3.5-flash",
       api_key: "test-llm-key",
       max_tokens: 1000,
       temperature: 0.3,
     },
     embedding: {
       provider: "openai",
-      model: "text-embedding-3-small",
+      model: "text-embedding-v4",
       api_key: "test-embed-key",
       dimensions: 1536,
       batch_size: 500,

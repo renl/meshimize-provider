@@ -132,7 +132,7 @@ function createTestOptions(overrides?: Partial<RagPipelineOptions>): RagPipeline
     distanceMetric: "cosine",
     staleDays: 7,
     embeddingApiKey: "test-key",
-    embeddingModel: "text-embedding-3-small",
+    embeddingModel: "text-embedding-v4",
     embeddingDimensions: 1536,
     batchSize: 500,
     requestsPerMinute: 3000,

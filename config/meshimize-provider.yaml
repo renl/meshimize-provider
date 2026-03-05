@@ -8,7 +8,7 @@ meshimize:
 
 llm:
   provider: "openai"
-  model: "gpt-4o-mini"
+  model: "qwen3.5-flash"
   api_key: "YOUR_OPENAI_API_KEY" # Override: LLM_API_KEY
   # base_url: "https://api.openai.com/v1"  # Override: LLM_BASE_URL (optional — for OpenAI-compatible providers)
   max_tokens: 1000
@@ -16,7 +16,7 @@ llm:
 
 embedding:
   provider: "openai"
-  model: "text-embedding-3-small"
+  model: "text-embedding-v4"
   api_key: "YOUR_OPENAI_API_KEY" # Override: EMBEDDING_API_KEY
   # base_url: "https://api.openai.com/v1"  # Override: EMBEDDING_BASE_URL (optional — for OpenAI-compatible providers)
   dimensions: 1024

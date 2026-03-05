@@ -40,7 +40,7 @@ function validConfig(): Record<string, unknown> {
     },
     llm: {
       provider: "openai",
-      model: "gpt-4o-mini",
+      model: "qwen3.5-flash",
       api_key: "test-llm-key",
     },
     embedding: {
