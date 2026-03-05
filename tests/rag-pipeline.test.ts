@@ -419,6 +419,19 @@ describe("rag-pipeline", () => {
     expect(result.docCount).toBe(1);
   });
 
+  it("should ignore ChromaNotFoundError detected by name property during ingest", async () => {
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nSome content.");
+    mockDeleteCollection.mockRejectedValue(
+      Object.assign(new Error("whatever"), { name: "ChromaNotFoundError" }),
+    );
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const result = await pipeline.ingest(group);
+    expect(result.docCount).toBe(1);
+  });
+
   // ─── group_id mismatch ───
 
   it("should return true from needsIngestion when group_id mismatches", async () => {
