@@ -190,11 +190,11 @@ export class LifecycleManager {
         const postResult = await answerPoster.post(question.group_id, {
           content: answer.content,
           message_type: "answer",
-          parent_message_id: question.message_id,
+          parent_message_id: question.id,
         });
         if (!postResult.success) {
           throw new Error(
-            `Answer post failed for group_id=${question.group_id}, message_id=${question.message_id} (httpStatus=${postResult.httpStatus}, deadLettered=${postResult.deadLettered})`,
+            `Answer post failed for group_id=${question.group_id}, message_id=${question.id} (httpStatus=${postResult.httpStatus}, deadLettered=${postResult.deadLettered})`,
           );
         }
       },

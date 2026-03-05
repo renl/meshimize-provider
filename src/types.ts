@@ -2,14 +2,17 @@
 
 /** Meshimize server message payload received via WebSocket */
 export interface IncomingQuestion {
-  message_id: string;
+  id: string;
   group_id: string;
-  sender_id: string;
-  sender_name: string;
+  sender: {
+    id: string;
+    display_name: string;
+    verified: boolean;
+  };
   content: string;
-  message_type: "question";
-  inserted_at: string;
+  message_type: string;
   parent_message_id: string | null;
+  inserted_at: string;
 }
 
 /** Answer to be posted back via REST API */

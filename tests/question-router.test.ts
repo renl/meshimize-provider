@@ -26,10 +26,9 @@ function createMockGroupConfig(overrides?: Partial<GroupConfig>): GroupConfig {
 
 function createMockQuestion(overrides?: Partial<IncomingQuestion>): IncomingQuestion {
   return {
-    message_id: "msg-001",
+    id: "msg-001",
     group_id: "550e8400-e29b-41d4-a716-446655440000",
-    sender_id: "sender-001",
-    sender_name: "Test User",
+    sender: { id: "sender-001", display_name: "Test User", verified: false },
     content: "How do I deploy?",
     message_type: "question",
     inserted_at: new Date().toISOString(),
@@ -100,8 +99,8 @@ describe("QuestionRouter", () => {
 
     router.registerGroup(group);
 
-    const q1 = createMockQuestion({ message_id: "msg-001" });
-    const q2 = createMockQuestion({ message_id: "msg-002" });
+    const q1 = createMockQuestion({ id: "msg-001" });
+    const q2 = createMockQuestion({ id: "msg-002" });
 
     router.enqueue(q1);
     router.enqueue(q2);
@@ -147,12 +146,12 @@ describe("QuestionRouter", () => {
     router.registerGroup(group);
 
     // First question starts processing (uses the 1 worker slot)
-    router.enqueue(createMockQuestion({ message_id: "msg-001" }));
+    router.enqueue(createMockQuestion({ id: "msg-001" }));
     // These fill the queue
-    router.enqueue(createMockQuestion({ message_id: "msg-002" }));
-    router.enqueue(createMockQuestion({ message_id: "msg-003" }));
+    router.enqueue(createMockQuestion({ id: "msg-002" }));
+    router.enqueue(createMockQuestion({ id: "msg-003" }));
     // This should be dropped (queue has 2 items = maxQueueDepth)
-    router.enqueue(createMockQuestion({ message_id: "msg-004" }));
+    router.enqueue(createMockQuestion({ id: "msg-004" }));
 
     const stats = router.getStats();
     // Queue should have at most maxQueueDepth items
@@ -176,7 +175,7 @@ describe("QuestionRouter", () => {
     let callIdx = 0;
     processQuestion = vi.fn().mockImplementation((question: IncomingQuestion) => {
       callIdx++;
-      processOrder.push(question.message_id);
+      processOrder.push(question.id);
       if (callIdx === 1) return firstPromise;
       return Promise.resolve();
     });
@@ -189,9 +188,9 @@ describe("QuestionRouter", () => {
 
     router.registerGroup(group);
 
-    router.enqueue(createMockQuestion({ message_id: "msg-A" }));
-    router.enqueue(createMockQuestion({ message_id: "msg-B" }));
-    router.enqueue(createMockQuestion({ message_id: "msg-C" }));
+    router.enqueue(createMockQuestion({ id: "msg-A" }));
+    router.enqueue(createMockQuestion({ id: "msg-B" }));
+    router.enqueue(createMockQuestion({ id: "msg-C" }));
 
     // Wait for first to start
     await vi.waitFor(() => {
@@ -290,13 +289,13 @@ describe("QuestionRouter", () => {
 
     router.enqueue(
       createMockQuestion({
-        message_id: "msg-g1",
+        id: "msg-g1",
         group_id: "550e8400-e29b-41d4-a716-446655440001",
       }),
     );
     router.enqueue(
       createMockQuestion({
-        message_id: "msg-g2",
+        id: "msg-g2",
         group_id: "550e8400-e29b-41d4-a716-446655440002",
       }),
     );
@@ -325,8 +324,8 @@ describe("QuestionRouter", () => {
 
     router.registerGroup(group);
 
-    router.enqueue(createMockQuestion({ message_id: "msg-001" }));
-    router.enqueue(createMockQuestion({ message_id: "msg-002" }));
+    router.enqueue(createMockQuestion({ id: "msg-001" }));
+    router.enqueue(createMockQuestion({ id: "msg-002" }));
 
     await vi.waitFor(() => {
       expect(processQuestion).toHaveBeenCalledTimes(2);

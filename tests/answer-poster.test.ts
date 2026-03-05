@@ -71,11 +71,13 @@ describe("AnswerPoster", () => {
     expect(reqHeaders["Authorization"]).toBe("Bearer test-token-123");
 
     const parsedBody = JSON.parse(options.body as string) as {
-      message: { content: string; message_type: string; parent_message_id: string };
+      content: string;
+      message_type: string;
+      parent_message_id: string;
     };
-    expect(parsedBody.message.content).toBe(answer.content);
-    expect(parsedBody.message.message_type).toBe("answer");
-    expect(parsedBody.message.parent_message_id).toBe("msg-001");
+    expect(parsedBody.content).toBe(answer.content);
+    expect(parsedBody.message_type).toBe("answer");
+    expect(parsedBody.parent_message_id).toBe("msg-001");
   });
 
   it("should retry on 500 — waits 2s, retries once", async () => {
@@ -199,15 +201,15 @@ describe("AnswerPoster", () => {
 
     const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     const parsedBody = JSON.parse(options.body as string) as {
-      message: { content: string; message_type: string; parent_message_id: string };
+      content: string;
+      message_type: string;
+      parent_message_id: string;
     };
 
     expect(parsedBody).toEqual({
-      message: {
-        content: "Test answer content",
-        message_type: "answer",
-        parent_message_id: "parent-msg-123",
-      },
+      content: "Test answer content",
+      message_type: "answer",
+      parent_message_id: "parent-msg-123",
     });
   });
 

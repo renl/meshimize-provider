@@ -367,16 +367,30 @@ export class ConnectionManager {
     if (event === "new_message") {
       const channel = this.channels.get(topic);
       if (channel && channel.joined) {
-        const question = payload as IncomingQuestion;
+        const message = payload as IncomingQuestion;
+
+        // Only process questions — ignore answers, posts, etc. to prevent infinite loop
+        if (message.message_type !== "question") {
+          this.logger.debug(
+            {
+              messageId: message.id,
+              groupId: message.group_id,
+              messageType: message.message_type,
+            },
+            "Ignoring non-question message",
+          );
+          return;
+        }
+
         this.logger.info(
           {
-            messageId: question.message_id,
-            groupId: question.group_id,
-            senderName: question.sender_name,
+            messageId: message.id,
+            groupId: message.group_id,
+            senderName: message.sender.display_name,
           },
           "Received question",
         );
-        this.onQuestion(question, channel.groupConfig);
+        this.onQuestion(message, channel.groupConfig);
       }
     }
   }

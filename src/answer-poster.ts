@@ -30,11 +30,9 @@ export class AnswerPoster {
       Authorization: `Bearer ${this.options.token}`,
     };
     const body = JSON.stringify({
-      message: {
-        content: answer.content,
-        message_type: answer.message_type,
-        parent_message_id: answer.parent_message_id,
-      },
+      content: answer.content,
+      message_type: answer.message_type,
+      parent_message_id: answer.parent_message_id,
     });
 
     let failureCount = 0;

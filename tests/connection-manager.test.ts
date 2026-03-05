@@ -304,10 +304,9 @@ describe("ConnectionManager", () => {
 
     // Simulate incoming question
     const questionPayload: IncomingQuestion = {
-      message_id: "msg-001",
+      id: "msg-001",
       group_id: group.group_id,
-      sender_id: "user-456",
-      sender_name: "Alice",
+      sender: { id: "user-456", display_name: "Alice", verified: false },
       content: "What is Meshimize?",
       message_type: "question",
       inserted_at: "2026-03-03T10:00:00Z",
@@ -317,10 +316,158 @@ describe("ConnectionManager", () => {
     mockWs.simulateMessage([null, null, `group:${group.group_id}`, "new_message", questionPayload]);
 
     expect(questions).toHaveLength(1);
-    expect(questions[0].question.message_id).toBe("msg-001");
+    expect(questions[0].question.id).toBe("msg-001");
     expect(questions[0].question.content).toBe("What is Meshimize?");
     expect(questions[0].question.message_type).toBe("question");
     expect(questions[0].groupConfig.group_id).toBe(group.group_id);
+  });
+
+  it("should NOT forward messages with message_type 'answer' to onQuestion (prevents infinite loop)", async () => {
+    const { cm, mockWs, questions } = createConnectionManager();
+
+    const connectPromise = cm.connect();
+    mockWs.simulateOpen();
+    await connectPromise;
+
+    const group = createMockGroupConfig();
+    const joinPromise = cm.joinGroup(group);
+
+    const joinMsg = JSON.parse(mockWs.sentMessages[0]) as unknown[];
+    mockWs.simulateMessage([
+      joinMsg[0],
+      joinMsg[1],
+      `group:${group.group_id}`,
+      "phx_reply",
+      { status: "ok", response: {} },
+    ]);
+    await joinPromise;
+
+    // Simulate incoming answer message (NOT a question)
+    const answerPayload: IncomingQuestion = {
+      id: "msg-answer-001",
+      group_id: group.group_id,
+      sender: { id: "agent-001", display_name: "Provider Agent", verified: true },
+      content: "This is an answer",
+      message_type: "answer",
+      inserted_at: "2026-03-03T10:01:00Z",
+      parent_message_id: "msg-001",
+    };
+
+    mockWs.simulateMessage([null, null, `group:${group.group_id}`, "new_message", answerPayload]);
+
+    expect(questions).toHaveLength(0);
+  });
+
+  it("should NOT forward messages with message_type 'post' to onQuestion", async () => {
+    const { cm, mockWs, questions } = createConnectionManager();
+
+    const connectPromise = cm.connect();
+    mockWs.simulateOpen();
+    await connectPromise;
+
+    const group = createMockGroupConfig();
+    const joinPromise = cm.joinGroup(group);
+
+    const joinMsg = JSON.parse(mockWs.sentMessages[0]) as unknown[];
+    mockWs.simulateMessage([
+      joinMsg[0],
+      joinMsg[1],
+      `group:${group.group_id}`,
+      "phx_reply",
+      { status: "ok", response: {} },
+    ]);
+    await joinPromise;
+
+    // Simulate incoming post message (NOT a question)
+    const postPayload: IncomingQuestion = {
+      id: "msg-post-001",
+      group_id: group.group_id,
+      sender: { id: "user-123", display_name: "Human User", verified: false },
+      content: "Just a general post",
+      message_type: "post",
+      inserted_at: "2026-03-03T10:02:00Z",
+      parent_message_id: null,
+    };
+
+    mockWs.simulateMessage([null, null, `group:${group.group_id}`, "new_message", postPayload]);
+
+    expect(questions).toHaveLength(0);
+  });
+
+  it("should ONLY forward messages with message_type 'question' to onQuestion", async () => {
+    const { cm, mockWs, questions } = createConnectionManager();
+
+    const connectPromise = cm.connect();
+    mockWs.simulateOpen();
+    await connectPromise;
+
+    const group = createMockGroupConfig();
+    const joinPromise = cm.joinGroup(group);
+
+    const joinMsg = JSON.parse(mockWs.sentMessages[0]) as unknown[];
+    mockWs.simulateMessage([
+      joinMsg[0],
+      joinMsg[1],
+      `group:${group.group_id}`,
+      "phx_reply",
+      { status: "ok", response: {} },
+    ]);
+    await joinPromise;
+
+    // Send answer — should be ignored
+    mockWs.simulateMessage([
+      null,
+      null,
+      `group:${group.group_id}`,
+      "new_message",
+      {
+        id: "msg-a1",
+        group_id: group.group_id,
+        sender: { id: "agent-001", display_name: "Agent", verified: true },
+        content: "Answer",
+        message_type: "answer",
+        inserted_at: "2026-03-03T10:00:00Z",
+        parent_message_id: "msg-q1",
+      },
+    ]);
+
+    // Send post — should be ignored
+    mockWs.simulateMessage([
+      null,
+      null,
+      `group:${group.group_id}`,
+      "new_message",
+      {
+        id: "msg-p1",
+        group_id: group.group_id,
+        sender: { id: "user-001", display_name: "User", verified: false },
+        content: "Post",
+        message_type: "post",
+        inserted_at: "2026-03-03T10:01:00Z",
+        parent_message_id: null,
+      },
+    ]);
+
+    // Send question — should be forwarded
+    mockWs.simulateMessage([
+      null,
+      null,
+      `group:${group.group_id}`,
+      "new_message",
+      {
+        id: "msg-q1",
+        group_id: group.group_id,
+        sender: { id: "user-002", display_name: "Questioner", verified: false },
+        content: "How do I deploy?",
+        message_type: "question",
+        inserted_at: "2026-03-03T10:02:00Z",
+        parent_message_id: null,
+      },
+    ]);
+
+    expect(questions).toHaveLength(1);
+    expect(questions[0].question.id).toBe("msg-q1");
+    expect(questions[0].question.content).toBe("How do I deploy?");
   });
 
   it("should reconnect on disconnect with exponential backoff from config delays", async () => {
@@ -575,10 +722,9 @@ describe("ConnectionManager", () => {
       `group:${group.group_id}`,
       "new_message",
       {
-        message_id: "msg-stale",
+        id: "msg-stale",
         group_id: group.group_id,
-        sender_id: "user-999",
-        sender_name: "Eve",
+        sender: { id: "user-999", display_name: "Eve", verified: false },
         content: "Should not be received",
         message_type: "question",
         inserted_at: "2026-03-03T10:00:00Z",
@@ -741,10 +887,9 @@ describe("ConnectionManager", () => {
 
     // 7. Simulate a new_message after reconnect and verify it's delivered
     const questionPayload: IncomingQuestion = {
-      message_id: "msg-reconnect-001",
+      id: "msg-reconnect-001",
       group_id: group.group_id,
-      sender_id: "user-789",
-      sender_name: "Bob",
+      sender: { id: "user-789", display_name: "Bob", verified: false },
       content: "Question after reconnect?",
       message_type: "question",
       inserted_at: "2026-03-03T12:00:00Z",
@@ -759,7 +904,7 @@ describe("ConnectionManager", () => {
     ]);
 
     expect(questions).toHaveLength(1);
-    expect(questions[0].question.message_id).toBe("msg-reconnect-001");
+    expect(questions[0].question.id).toBe("msg-reconnect-001");
     expect(questions[0].question.content).toBe("Question after reconnect?");
     expect(questions[0].groupConfig.group_id).toBe(group.group_id);
 
