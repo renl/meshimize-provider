@@ -42,7 +42,7 @@ export class LifecycleManager {
     const maxRetries = options.chromaDbMaxRetries ?? 10;
     const initialDelayMs = options.chromaDbInitialDelayMs ?? 1000;
     this.chromaDbMaxRetries = Math.max(1, maxRetries);
-    this.chromaDbInitialDelayMs = Math.max(1, initialDelayMs);
+    this.chromaDbInitialDelayMs = Math.max(0, initialDelayMs);
   }
 
   /** Wait for ChromaDB to become reachable before proceeding with ingestion. */
@@ -51,7 +51,13 @@ export class LifecycleManager {
     let lastError: unknown;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        await client.heartbeat();
+        const heartbeatWithTimeout = Promise.race([
+          client.heartbeat(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("ChromaDB heartbeat timeout (5s)")), 5000),
+          ),
+        ]);
+        await heartbeatWithTimeout;
         this.logger.info({ attempt }, "ChromaDB is ready");
         return true;
       } catch (error) {
