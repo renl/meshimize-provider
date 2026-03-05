@@ -252,6 +252,40 @@ describe("config", () => {
     }
   });
 
+  it("should override groups[0].group_id from GROUP_ID env var", () => {
+    const originalEnv = process.env.GROUP_ID;
+    try {
+      process.env.GROUP_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.groups[0].group_id).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.GROUP_ID;
+      } else {
+        process.env.GROUP_ID = originalEnv;
+      }
+    }
+  });
+
+  it("should override groups[0].group_name from GROUP_NAME env var", () => {
+    const originalEnv = process.env.GROUP_NAME;
+    try {
+      process.env.GROUP_NAME = "Overridden Group";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.groups[0].group_name).toBe("Overridden Group");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.GROUP_NAME;
+      } else {
+        process.env.GROUP_NAME = originalEnv;
+      }
+    }
+  });
+
   it("should reject invalid llm.provider value", () => {
     const cfg = validConfig();
     (cfg.llm as Record<string, unknown>).provider = "invalid-provider";

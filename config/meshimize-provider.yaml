@@ -39,8 +39,8 @@ agent:
   log_level: "info"
 
 groups:
-  - group_id: "00000000-0000-0000-0000-000000000001"
-    group_name: "Fly.io Docs"
+  - group_id: "00000000-0000-0000-0000-000000000001" # Override: GROUP_ID
+    group_name: "Fly.io Docs" # Override: GROUP_NAME
     slug: "fly-docs"
     docs_path: "./docs-source/fly-docs"
     chunk_size: 1000

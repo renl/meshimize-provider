@@ -120,6 +120,22 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
   }
 }
 
+function applyGroupEnvOverrides(config: Record<string, unknown>): void {
+  const groups = config.groups;
+  if (!Array.isArray(groups) || groups.length === 0) return;
+  const first = groups[0] as Record<string, unknown>;
+
+  const groupId = process.env.GROUP_ID;
+  if (groupId !== undefined) {
+    first.group_id = groupId;
+  }
+
+  const groupName = process.env.GROUP_NAME;
+  if (groupName !== undefined) {
+    first.group_name = groupName;
+  }
+}
+
 export function loadConfig(configPath: string): Config {
   const raw = readFileSync(configPath, "utf-8");
   const parsed = parseYaml(raw);
@@ -130,6 +146,7 @@ export function loadConfig(configPath: string): Config {
 
   // Apply env var overrides (highest priority)
   applyEnvOverrides(configObject);
+  applyGroupEnvOverrides(configObject);
 
   // Validate with Zod
   return ConfigSchema.parse(configObject);
