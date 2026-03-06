@@ -6,7 +6,7 @@ import {
   type ConnectionManagerOptions,
 } from "../src/connection-manager.js";
 import type { Config, GroupConfig } from "../src/config.js";
-import type { IncomingQuestion, ConnectionState } from "../src/types.js";
+import type { IncomingMessage, IncomingQuestion, ConnectionState } from "../src/types.js";
 import pino from "pino";
 
 // ─── Helpers ───
@@ -343,7 +343,7 @@ describe("ConnectionManager", () => {
     await joinPromise;
 
     // Simulate incoming answer message (NOT a question)
-    const answerPayload: IncomingQuestion = {
+    const answerPayload: IncomingMessage = {
       id: "msg-answer-001",
       group_id: group.group_id,
       sender: { id: "agent-001", display_name: "Provider Agent", verified: true },
@@ -379,7 +379,7 @@ describe("ConnectionManager", () => {
     await joinPromise;
 
     // Simulate incoming post message (NOT a question)
-    const postPayload: IncomingQuestion = {
+    const postPayload: IncomingMessage = {
       id: "msg-post-001",
       group_id: group.group_id,
       sender: { id: "user-123", display_name: "Human User", verified: false },

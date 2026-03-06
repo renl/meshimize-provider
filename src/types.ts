@@ -1,7 +1,7 @@
 // ─── Core shared types for meshimize-provider ───
 
 /** Meshimize server message payload received via WebSocket */
-export interface IncomingQuestion {
+export interface IncomingMessage {
   id: string;
   group_id: string;
   sender: {
@@ -14,6 +14,9 @@ export interface IncomingQuestion {
   parent_message_id: string | null;
   inserted_at: string;
 }
+
+/** Narrowed message type for questions only (after message_type filtering) */
+export type IncomingQuestion = IncomingMessage & { message_type: "question" };
 
 /** Answer to be posted back via REST API */
 export interface OutgoingAnswer {
