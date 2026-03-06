@@ -52,7 +52,7 @@ export class QuestionRouter {
     // Guard: reject enqueue after stop() — prevent silent message loss during shutdown
     if (this.stopped) {
       this.options.logger.warn(
-        { groupId: question.group_id, messageId: question.message_id },
+        { groupId: question.group_id, messageId: question.id },
         "Question dropped — router is stopped",
       );
       return;
@@ -61,7 +61,7 @@ export class QuestionRouter {
     const group = this.groups.get(question.group_id);
     if (!group) {
       this.options.logger.warn(
-        { groupId: question.group_id, messageId: question.message_id },
+        { groupId: question.group_id, messageId: question.id },
         "Question for unknown group",
       );
       return;
@@ -71,7 +71,7 @@ export class QuestionRouter {
       this.options.logger.warn(
         {
           groupId: question.group_id,
-          messageId: question.message_id,
+          messageId: question.id,
           queueLength: group.queue.length,
           maxQueueDepth: this.options.maxQueueDepth,
         },
@@ -150,7 +150,7 @@ export class QuestionRouter {
     }
 
     this.options.logger.info(
-      { messageId: question.message_id, groupId, queueDepth: group.queue.length },
+      { messageId: question.id, groupId, queueDepth: group.queue.length },
       "Processing question",
     );
 
@@ -163,13 +163,13 @@ export class QuestionRouter {
         group.answeredCount++;
         group.totalLatencyMs += durationMs;
         this.options.logger.info(
-          { messageId: question.message_id, groupId, durationMs },
+          { messageId: question.id, groupId, durationMs },
           "Question processed",
         );
       })
       .catch((err) => {
         this.options.logger.error(
-          { err, messageId: question.message_id, groupId },
+          { err, messageId: question.id, groupId },
           "Question processing failed",
         );
       })
