@@ -48,7 +48,7 @@ groups:
     top_k: 5
     max_concurrency: 2
 
-  - group_id: "YOUR_ELIXIR_GROUP_ID_HERE"
+  - group_id: "00000000-0000-0000-0000-000000000002" # Replace with actual group ID after creation
     group_name: "Elixir Docs"
     slug: "elixir-docs"
     docs_path: "./docs-source/elixir-docs"

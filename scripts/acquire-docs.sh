@@ -28,7 +28,7 @@ acquire_fly_docs() {
 
 # ─── Elixir Docs ───
 # Builds Elixir standard library docs from source using ExDoc.
-# Prerequisites: Erlang/OTP 27+, git, make, mix (from Erlang install)
+# Prerequisites: Erlang/OTP 27+, git, make
 acquire_elixir_docs() {
   local slug="elixir-docs"
   local elixir_version="${ELIXIR_VERSION:-v1.18.3}"
@@ -40,11 +40,23 @@ acquire_elixir_docs() {
   echo "Building Elixir docs from source (${elixir_version})..."
   echo "  This requires Erlang/OTP 27+ and takes several minutes."
 
-  # Verify Erlang is available
+  # Verify Erlang is available and meets minimum OTP version
   if ! command -v erl &>/dev/null; then
     echo "ERROR: Erlang/OTP not found. Install Erlang/OTP 27+ first." >&2
     exit 1
   fi
+
+  local otp_release
+  otp_release="$(erl -noshell -eval 'io:format("~s~n", [erlang:system_info(otp_release)]), halt().' 2>/dev/null | tr -d '\r')"
+  if [ -z "${otp_release}" ] || ! [[ "${otp_release}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Unable to determine Erlang/OTP version. Ensure Erlang/OTP 27+ is installed." >&2
+    exit 1
+  fi
+  if [ "${otp_release}" -lt 27 ]; then
+    echo "ERROR: Erlang/OTP ${otp_release} detected, but 27+ is required." >&2
+    exit 1
+  fi
+  echo "  Erlang/OTP ${otp_release} detected."
 
   # Set up working directory
   mkdir -p "${work_dir}"
@@ -52,16 +64,15 @@ acquire_elixir_docs() {
   local elixir_dir="${work_dir}/elixir"
   local ex_doc_dir="${work_dir}/ex_doc"
 
-  # Clone or update Elixir repo at specified version
+  # Clone or update Elixir repo at specified version (shallow)
   if [ -d "${elixir_dir}/.git" ]; then
     echo "Updating Elixir repo..."
-    git -C "${elixir_dir}" fetch --tags
-    git -C "${elixir_dir}" checkout "${elixir_version}"
+    git -C "${elixir_dir}" fetch --depth 1 origin "${elixir_version}"
+    git -C "${elixir_dir}" checkout FETCH_HEAD
     git -C "${elixir_dir}" clean -fdx
   else
     echo "Cloning Elixir repo (${elixir_version})..."
-    git clone "${elixir_repo}" "${elixir_dir}"
-    git -C "${elixir_dir}" checkout "${elixir_version}"
+    git clone --depth 1 --branch "${elixir_version}" "${elixir_repo}" "${elixir_dir}"
   fi
 
   # Clone or update ExDoc as sibling directory
@@ -88,7 +99,7 @@ acquire_elixir_docs() {
     mix escript.build
   )
 
-  # Generate docs with ExDoc markdown output
+  # Generate docs with ExDoc
   echo "Generating Elixir docs..."
   (
     cd "${elixir_dir}"

@@ -12,12 +12,12 @@ Output is written to `docs-source/<slug>/` (git-ignored).
 
 ## Prerequisites
 
-| Dependency      | Required For  | Notes                                         |
-| --------------- | ------------- | --------------------------------------------- |
-| `git`           | All           | Cloning documentation repositories            |
-| `Erlang/OTP 27` | `elixir-docs` | Required to compile Elixir from source        |
-| `make`          | `elixir-docs` | Building Elixir and ExDoc                     |
-| `mix`           | `elixir-docs` | Ships with Erlang/OTP install (used by ExDoc) |
+| Dependency      | Required For  | Notes                                           |
+| --------------- | ------------- | ----------------------------------------------- |
+| `git`           | All           | Cloning documentation repositories              |
+| `Erlang/OTP 27` | `elixir-docs` | Required to compile Elixir from source          |
+| `make`          | `elixir-docs` | Building Elixir and ExDoc                       |
+| `mix`           | `elixir-docs` | Provided by the compiled Elixir (used by ExDoc) |
 
 > **Note**: The `fly-docs` target only requires `git`.
 
@@ -57,11 +57,16 @@ The script:
 2. Clones `elixir-lang/ex_doc` as a build tool
 3. Compiles Elixir from source
 4. Builds the ExDoc escript
-5. Runs `make docs` to generate markdown documentation
+5. Runs `make docs` to generate documentation (ExDoc produces HTML for API docs)
 6. Copies the 6 doc sets (`elixir`, `mix`, `ex_unit`, `iex`, `logger`, `eex`) to the output
    directory
 7. Copies guide pages (getting-started, references, mix-and-otp, anti-patterns, meta-programming,
    cheatsheets) to `guides/`
+
+> **Note on file formats**: The ingestion pipeline only reads markdown-like files (`*.md`,
+> `*.html.md`, `*.html.markerb`). The guide pages in `guides/` are native markdown and will be
+> ingested directly. The ExDoc API docs contain HTML files which are not ingested by default — these
+> are included for completeness and potential future use with an HTML-to-markdown conversion step.
 
 - **Output**: `docs-source/elixir-docs/`
 - **Time**: Several minutes (compiling from source)
