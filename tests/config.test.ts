@@ -304,6 +304,84 @@ describe("config", () => {
     }
   });
 
+  it("should override groups[1].group_id from GROUP_2_ID env var", () => {
+    const originalEnv = process.env.GROUP_2_ID;
+    try {
+      const cfg = validConfig();
+      (cfg.groups as Record<string, unknown>[]).push({
+        group_id: "660e8400-e29b-41d4-a716-446655440000",
+        group_name: "Second Group",
+        slug: "second-group",
+        docs_path: "./second-docs",
+      });
+      process.env.GROUP_2_ID = "11111111-2222-3333-4444-555555555555";
+      const configPath = writeYamlConfig(tempDir, cfg);
+      const config = loadConfig(configPath);
+
+      expect(config.groups[1].group_id).toBe("11111111-2222-3333-4444-555555555555");
+      // Ensure group 1 is not affected
+      expect(config.groups[0].group_id).toBe("550e8400-e29b-41d4-a716-446655440000");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.GROUP_2_ID;
+      } else {
+        process.env.GROUP_2_ID = originalEnv;
+      }
+    }
+  });
+
+  it("should override groups[1].group_name from GROUP_2_NAME env var", () => {
+    const originalEnv = process.env.GROUP_2_NAME;
+    try {
+      const cfg = validConfig();
+      (cfg.groups as Record<string, unknown>[]).push({
+        group_id: "660e8400-e29b-41d4-a716-446655440000",
+        group_name: "Second Group",
+        slug: "second-group",
+        docs_path: "./second-docs",
+      });
+      process.env.GROUP_2_NAME = "Overridden Second Group";
+      const configPath = writeYamlConfig(tempDir, cfg);
+      const config = loadConfig(configPath);
+
+      expect(config.groups[1].group_name).toBe("Overridden Second Group");
+      // Ensure group 1 is not affected
+      expect(config.groups[0].group_name).toBe("Test Group");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.GROUP_2_NAME;
+      } else {
+        process.env.GROUP_2_NAME = originalEnv;
+      }
+    }
+  });
+
+  it("should not apply GROUP_2 overrides when only one group exists", () => {
+    const origId = process.env.GROUP_2_ID;
+    const origName = process.env.GROUP_2_NAME;
+    try {
+      process.env.GROUP_2_ID = "11111111-2222-3333-4444-555555555555";
+      process.env.GROUP_2_NAME = "Should Not Appear";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.groups).toHaveLength(1);
+      expect(config.groups[0].group_id).toBe("550e8400-e29b-41d4-a716-446655440000");
+      expect(config.groups[0].group_name).toBe("Test Group");
+    } finally {
+      if (origId === undefined) {
+        delete process.env.GROUP_2_ID;
+      } else {
+        process.env.GROUP_2_ID = origId;
+      }
+      if (origName === undefined) {
+        delete process.env.GROUP_2_NAME;
+      } else {
+        process.env.GROUP_2_NAME = origName;
+      }
+    }
+  });
+
   it("should reject invalid llm.provider value", () => {
     const cfg = validConfig();
     (cfg.llm as Record<string, unknown>).provider = "invalid-provider";

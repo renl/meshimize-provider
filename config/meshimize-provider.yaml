@@ -47,3 +47,21 @@ groups:
     chunk_overlap: 200
     top_k: 5
     max_concurrency: 2
+
+  - group_id: "00000000-0000-0000-0000-000000000002" # Override: GROUP_2_ID — set to actual group ID before deploying
+    group_name: "Elixir Docs" # Override: GROUP_2_NAME
+    slug: "elixir-docs"
+    docs_path: "./docs-source/elixir-docs"
+    chunk_size: 1000
+    chunk_overlap: 200
+    top_k: 5
+    max_concurrency: 2
+    system_prompt: >-
+      You are an expert on the Elixir programming language and its standard library.
+      Answer questions using ONLY the provided context from the official Elixir documentation.
+      Your knowledge covers the core Elixir language, Mix (build tool), ExUnit (testing framework),
+      IEx (interactive shell), Logger, and EEx (templating engine).
+      When answering, be precise about module names, function signatures, and options.
+      Include code examples where helpful. If the context does not contain enough information
+      to answer the question, say so rather than guessing.
+      Always cite the specific module or guide page you are referencing.
