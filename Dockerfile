@@ -27,6 +27,8 @@ RUN npm ci --omit=dev --ignore-scripts
 COPY --from=builder /app/dist/ ./dist/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
 
 # ChromaDB data directory (Fly.io volume mount point)
 RUN mkdir -p /data/chromadb
@@ -70,4 +72,5 @@ ENV CHROMADB_PERSIST_DIR=/data/chromadb
 
 EXPOSE 8080
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["supervisord", "-c", "/etc/supervisord.conf", "-n"]
