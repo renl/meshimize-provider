@@ -54,6 +54,15 @@ acquire_elixir_docs() {
     exit 1
   fi
 
+  # Validate OTP version (27+ required for Elixir 1.18+)
+  local otp_version
+  otp_version="$(erl -noshell -eval 'io:put_chars(erlang:system_info(otp_release)), halt().')"
+  if [ "${otp_version}" -lt 27 ] 2>/dev/null; then
+    echo "ERROR: Erlang/OTP ${otp_version} found, but 27+ is required."
+    echo "Install OTP 27+ and try again."
+    exit 1
+  fi
+
   echo "Building Elixir docs with ExDoc (Elixir ${elixir_version}, ExDoc ${exdoc_version})..."
 
   mkdir -p "${DOCS_DIR}"
@@ -94,14 +103,15 @@ acquire_elixir_docs() {
   make -C "${elixir_dir}" clean compile
 
   # ── Step 4: Build ExDoc escript ──
-  # ExDoc's Makefile expects ../ex_doc relative to the Elixir source dir.
-  # We build the escript using the just-compiled Elixir's mix.
+  # Build the ExDoc escript using the just-compiled Elixir's mix.
   echo "Building ExDoc escript..."
   local elixir_abs
   elixir_abs="$(cd "${elixir_dir}" && pwd)"
   (
     cd "${exdoc_dir}"
     export PATH="${elixir_abs}/bin:${PATH}"
+    export MIX_HOME="${DOCS_DIR}/.mix"
+    export HEX_HOME="${DOCS_DIR}/.hex"
     mix local.hex --force --if-missing
     mix deps.get
     mix escript.build
@@ -119,10 +129,15 @@ acquire_elixir_docs() {
   if [ -L "${expected_exdoc}" ]; then
     rm "${expected_exdoc}"
   elif [ -e "${expected_exdoc}" ]; then
-    echo "WARNING: ${expected_exdoc} exists and is not a symlink, removing..."
-    rm -rf "${expected_exdoc}"
+    echo "ERROR: ${expected_exdoc} exists and is not a symlink."
+    echo "Refusing to remove it automatically; please delete or move it manually, then rerun this script."
+    exit 1
   fi
   ln -s "${exdoc_abs}" "${expected_exdoc}"
+
+  # Ensure the temporary ExDoc symlink is always cleaned up, even on error
+  cleanup_exdoc_symlink() { rm -f "${expected_exdoc}"; }
+  trap cleanup_exdoc_symlink EXIT
 
   # Run make docs (generates doc/<library>/ directories with HTML + EPUB)
   CANONICAL="" make -C "${elixir_dir}" docs
@@ -201,8 +216,9 @@ acquire_elixir_docs() {
     echo "  WARNING: lib/elixir/pages/ not found, skipping guides"
   fi
 
-  # Clean up symlink
-  rm -f "${expected_exdoc}"
+  # Clean up symlink and clear the trap
+  cleanup_exdoc_symlink
+  trap - EXIT
 
   echo "Acquired: ${slug} → ${target} (${total_converted} API docs + ${guide_count} guides)"
 }
