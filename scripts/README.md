@@ -18,7 +18,7 @@ both git-ignored and reused across runs to avoid re-cloning.
 | ------------------ | ------------- | ---------------------------------------------- |
 | `git`              | All           | Cloning documentation repositories             |
 | `erl` (Erlang/OTP) | `elixir-docs` | OTP 27+ required to compile Elixir from source |
-| `make`             | `elixir-docs` | Building Elixir and ExDoc                      |
+| `make`             | `elixir-docs` | Compiling Elixir and running `make docs`       |
 | `pandoc`           | `elixir-docs` | Converting ExDoc HTML output to markdown       |
 
 ## Usage

@@ -57,7 +57,15 @@ acquire_elixir_docs() {
   # Validate OTP version (27+ required for Elixir 1.18+)
   local otp_version
   otp_version="$(erl -noshell -eval 'io:put_chars(erlang:system_info(otp_release)), halt().')"
-  if [ "${otp_version}" -lt 27 ] 2>/dev/null; then
+
+  # Ensure otp_version is a numeric major release before comparing
+  if ! [[ "${otp_version}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Unable to detect a valid numeric Erlang/OTP release (got: '${otp_version}')."
+    echo "Ensure Erlang/OTP 27+ is installed and 'erl' is on PATH."
+    exit 1
+  fi
+
+  if [ "${otp_version}" -lt 27 ]; then
     echo "ERROR: Erlang/OTP ${otp_version} found, but 27+ is required."
     echo "Install OTP 27+ and try again."
     exit 1
