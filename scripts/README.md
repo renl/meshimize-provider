@@ -12,14 +12,9 @@ Output is written to `docs-source/<slug>/` (git-ignored).
 
 ## Prerequisites
 
-| Dependency      | Required For  | Notes                                           |
-| --------------- | ------------- | ----------------------------------------------- |
-| `git`           | All           | Cloning documentation repositories              |
-| `Erlang/OTP 27` | `elixir-docs` | Required to compile Elixir from source          |
-| `make`          | `elixir-docs` | Building Elixir and ExDoc                       |
-| `mix`           | `elixir-docs` | Provided by the compiled Elixir (used by ExDoc) |
-
-> **Note**: The `fly-docs` target only requires `git`.
+| Dependency | Required For | Notes                              |
+| ---------- | ------------ | ---------------------------------- |
+| `git`      | All          | Cloning documentation repositories |
 
 ## Usage
 
@@ -47,33 +42,25 @@ subsequent runs, pulls the latest changes.
 
 ### `elixir-docs`
 
-Builds the Elixir standard library documentation from source using ExDoc. This is necessary because
-the Elixir docs are not available as pre-built markdown — they must be generated from the Elixir
-source code.
+Extracts guide pages and documentation markdown directly from the
+[Elixir source repository](https://github.com/elixir-lang/elixir). No compilation is needed — the
+script clones the repo at a specified version tag and copies `.md` files.
 
 The script:
 
-1. Clones `elixir-lang/elixir` at a specified version tag (default: `v1.18.3`)
-2. Clones `elixir-lang/ex_doc` as a build tool
-3. Compiles Elixir from source
-4. Builds the ExDoc escript
-5. Runs `make docs` to generate documentation (ExDoc produces HTML for API docs)
-6. Copies the 6 doc sets (`elixir`, `mix`, `ex_unit`, `iex`, `logger`, `eex`) to the output
-   directory
-7. Copies guide pages (getting-started, references, mix-and-otp, anti-patterns, meta-programming,
-   cheatsheets) to `guides/`
+1. Shallow-clones `elixir-lang/elixir` at a specified version tag (default: `v1.18.3`)
+2. Copies guide pages from `lib/elixir/pages/` preserving directory structure (getting-started,
+   mix-and-otp, meta-programming, anti-patterns, cheatsheets, references)
+3. Copies any `.md` files from library source directories (`mix`, `ex_unit`, `iex`, `logger`, `eex`)
 
-> **Note on file formats**: The ingestion pipeline only reads markdown-like files (`*.md`,
-> `*.html.md`, `*.html.markerb`). The guide pages in `guides/` are native markdown and will be
-> ingested directly. The ExDoc API docs contain HTML files which are not ingested by default — these
-> are included for completeness and potential future use with an HTML-to-markdown conversion step.
+All output files are native markdown (`.md`), matching the ingestion pipeline's supported formats.
 
 - **Output**: `docs-source/elixir-docs/`
-- **Time**: Several minutes (compiling from source)
+- **Time**: ~30 seconds (shallow clone only, no compilation)
 - **Elixir version**: Set via `ELIXIR_VERSION` env var (default: `v1.18.3`)
 
 ```bash
-# Build docs for a specific Elixir version
+# Extract docs for a specific Elixir version
 ELIXIR_VERSION=v1.17.3 ./scripts/acquire-docs.sh elixir-docs
 ```
 

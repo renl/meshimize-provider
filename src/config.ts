@@ -124,16 +124,29 @@ function applyEnvOverrides(config: Record<string, unknown>): void {
 function applyGroupEnvOverrides(config: Record<string, unknown>): void {
   const groups = config.groups;
   if (!Array.isArray(groups) || groups.length === 0) return;
-  const first = groups[0] as Record<string, unknown>;
 
+  // Group 1 overrides (GROUP_ID, GROUP_NAME)
+  const first = groups[0] as Record<string, unknown>;
   const groupId = process.env.GROUP_ID;
   if (groupId !== undefined) {
     first.group_id = groupId;
   }
-
   const groupName = process.env.GROUP_NAME;
   if (groupName !== undefined) {
     first.group_name = groupName;
+  }
+
+  // Group 2 overrides (GROUP_2_ID, GROUP_2_NAME)
+  if (groups.length > 1) {
+    const second = groups[1] as Record<string, unknown>;
+    const group2Id = process.env.GROUP_2_ID;
+    if (group2Id !== undefined) {
+      second.group_id = group2Id;
+    }
+    const group2Name = process.env.GROUP_2_NAME;
+    if (group2Name !== undefined) {
+      second.group_name = group2Name;
+    }
   }
 }
 

@@ -48,8 +48,8 @@ groups:
     top_k: 5
     max_concurrency: 2
 
-  - group_id: "00000000-0000-0000-0000-000000000002" # Replace with actual group ID after creation
-    group_name: "Elixir Docs"
+  - group_id: "00000000-0000-0000-0000-000000000002" # Override: GROUP_2_ID — set to actual group ID before deploying
+    group_name: "Elixir Docs" # Override: GROUP_2_NAME
     slug: "elixir-docs"
     docs_path: "./docs-source/elixir-docs"
     chunk_size: 1000
