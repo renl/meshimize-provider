@@ -8,7 +8,9 @@ The `acquire-docs.sh` script downloads and prepares documentation sources that t
 ingests into its vector store. Each documentation set is identified by a **slug** that matches the
 group configuration in `config/meshimize-provider.yaml`.
 
-Output is written to `docs-source/<slug>/` (git-ignored).
+Output is written to `docs-source/<slug>/` (git-ignored). The `elixir-docs` target also maintains a
+cached clone of the Elixir source repository at `docs-source/.elixir-source/` (also git-ignored),
+which is reused across runs to avoid re-cloning.
 
 ## Prerequisites
 
