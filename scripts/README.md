@@ -8,15 +8,18 @@ The `acquire-docs.sh` script downloads and prepares documentation sources that t
 ingests into its vector store. Each documentation set is identified by a **slug** that matches the
 group configuration in `config/meshimize-provider.yaml`.
 
-Output is written to `docs-source/<slug>/` (git-ignored). The `elixir-docs` target also maintains a
-cached clone of the Elixir source repository at `docs-source/.elixir-source/` (also git-ignored),
-which is reused across runs to avoid re-cloning.
+Output is written to `docs-source/<slug>/` (git-ignored). The `elixir-docs` target also maintains
+cached clones at `docs-source/.elixir-source/` (Elixir source) and `docs-source/.ex-doc/` (ExDoc),
+both git-ignored and reused across runs to avoid re-cloning.
 
 ## Prerequisites
 
-| Dependency | Required For | Notes                              |
-| ---------- | ------------ | ---------------------------------- |
-| `git`      | All          | Cloning documentation repositories |
+| Dependency         | Required For  | Notes                                          |
+| ------------------ | ------------- | ---------------------------------------------- |
+| `git`              | All           | Cloning documentation repositories             |
+| `erl` (Erlang/OTP) | `elixir-docs` | OTP 27+ required to compile Elixir from source |
+| `make`             | `elixir-docs` | Building Elixir and ExDoc                      |
+| `pandoc`           | `elixir-docs` | Converting ExDoc HTML output to markdown       |
 
 ## Usage
 
@@ -44,26 +47,34 @@ subsequent runs, pulls the latest changes.
 
 ### `elixir-docs`
 
-Extracts guide pages and documentation markdown directly from the
-[Elixir source repository](https://github.com/elixir-lang/elixir). No compilation is needed — the
-script clones the repo at a specified version tag and copies `.md` files.
+Builds full Elixir documentation using [ExDoc](https://github.com/elixir-lang/ex_doc), extracting
+both `@moduledoc`/`@doc` content from `.ex` source files and guide pages. This captures ~100% of
+Elixir's documentation (compared to ~24% with guide-only extraction).
 
 The script:
 
 1. Shallow-clones `elixir-lang/elixir` at a specified version tag (default: `v1.18.3`)
-2. Copies guide pages from `lib/elixir/pages/` preserving directory structure (getting-started,
-   mix-and-otp, meta-programming, anti-patterns, cheatsheets, references)
-3. Copies any `.md` files from library source directories (`mix`, `ex_unit`, `iex`, `logger`, `eex`)
+2. Shallow-clones `elixir-lang/ex_doc` at a specified version tag (default: `v0.40.1`)
+3. Compiles Elixir from source (`make clean compile`)
+4. Builds the ExDoc escript using the just-compiled Elixir's `mix`
+5. Runs `make docs` to generate HTML documentation for all 6 libraries (elixir, eex, mix, iex,
+   ex_unit, logger)
+6. Converts HTML files to markdown using `pandoc` (skips navigation/infrastructure files)
+7. Copies guide pages (native markdown) preserving directory structure
 
-All output files are native markdown (`.md`), matching the ingestion pipeline's supported formats.
+All output files are markdown (`.md`), matching the ingestion pipeline's supported formats.
 
 - **Output**: `docs-source/elixir-docs/`
-- **Time**: ~30 seconds (shallow clone only, no compilation)
+- **Time**: ~10-15 minutes (includes compilation of Elixir and ExDoc)
 - **Elixir version**: Set via `ELIXIR_VERSION` env var (default: `v1.18.3`)
+- **ExDoc version**: Set via `EXDOC_VERSION` env var (default: `v0.40.1`)
 
 ```bash
-# Extract docs for a specific Elixir version
+# Build docs for a specific Elixir version
 ELIXIR_VERSION=v1.17.3 ./scripts/acquire-docs.sh elixir-docs
+
+# Pin a specific ExDoc version
+EXDOC_VERSION=v0.40.1 ./scripts/acquire-docs.sh elixir-docs
 ```
 
 ## Idempotency
@@ -71,7 +82,8 @@ ELIXIR_VERSION=v1.17.3 ./scripts/acquire-docs.sh elixir-docs
 All acquisition functions are idempotent. Running the script multiple times is safe:
 
 - `fly-docs`: Pulls latest changes if already cloned
-- `elixir-docs`: Cleans and rebuilds the output directory from scratch
+- `elixir-docs`: Reuses cached Elixir source and ExDoc clones; rebuilds output directory from
+  scratch
 
 ## Uploading Docs to Fly.io
 
