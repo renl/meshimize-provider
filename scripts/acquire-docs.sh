@@ -48,6 +48,11 @@ acquire_elixir_docs() {
     git -C "${elixir_dir}" checkout FETCH_HEAD
     git -C "${elixir_dir}" clean -fdx
   else
+    # Remove stale directory that isn't a git repo (e.g. interrupted clone)
+    if [ -d "${elixir_dir}" ]; then
+      echo "Removing stale ${elixir_dir} (not a git repo)..."
+      rm -rf "${elixir_dir}"
+    fi
     echo "Cloning Elixir source (${elixir_version})..."
     git clone --depth 1 --branch "${elixir_version}" "${elixir_repo}" "${elixir_dir}"
   fi
