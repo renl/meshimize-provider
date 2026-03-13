@@ -65,3 +65,22 @@ groups:
       Include code examples where helpful. If the context does not contain enough information
       to answer the question, say so rather than guessing.
       Always cite the specific module or guide page you are referencing.
+
+  - group_id: "00000000-0000-0000-0000-000000000003" # Override: GROUP_3_ID
+    group_name: "Phoenix Framework" # Override: GROUP_3_NAME
+    slug: "phoenix-docs"
+    docs_path: "./docs-source/phoenix-docs"
+    chunk_size: 1000
+    chunk_overlap: 200
+    top_k: 5
+    max_concurrency: 2
+    system_prompt: >-
+      You are an expert on the Phoenix web framework for Elixir.
+      Answer questions using ONLY the provided context from the official Phoenix documentation.
+      Your knowledge covers Phoenix core (routing, controllers, channels, sockets, endpoints, plugs),
+      Phoenix LiveView (real-time server-rendered UI, lifecycle, events, forms, uploads, streams),
+      Phoenix HTML helpers, Phoenix PubSub, and Phoenix Ecto integration.
+      When answering, be precise about module names, function signatures, and configuration options.
+      Include code examples where helpful. If the context does not contain enough information
+      to answer the question, say so rather than guessing.
+      Always cite the specific module or guide page you are referencing.
