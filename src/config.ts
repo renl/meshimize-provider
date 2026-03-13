@@ -148,6 +148,19 @@ function applyGroupEnvOverrides(config: Record<string, unknown>): void {
       second.group_name = group2Name;
     }
   }
+
+  // Group 3 overrides (GROUP_3_ID, GROUP_3_NAME)
+  if (groups.length > 2) {
+    const third = groups[2] as Record<string, unknown>;
+    const group3Id = process.env.GROUP_3_ID;
+    if (group3Id !== undefined) {
+      third.group_id = group3Id;
+    }
+    const group3Name = process.env.GROUP_3_NAME;
+    if (group3Name !== undefined) {
+      third.group_name = group3Name;
+    }
+  }
 }
 
 export function loadConfig(configPath: string): Config {
