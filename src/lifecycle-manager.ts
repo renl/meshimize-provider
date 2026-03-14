@@ -185,18 +185,39 @@ export class LifecycleManager {
       maxQueueDepth: this.config.agent.queue_max_depth,
       logger: this.logger,
       processQuestion: async (question, groupConfig) => {
-        const chunks = await ragPipeline.retrieve(groupConfig, question.content);
+        const pipelineStart = Date.now();
+
+        const retrieveResult = await ragPipeline.retrieve(groupConfig, question.content);
+        const chunks = retrieveResult.chunks;
+
         const answer = await answerGenerator.generate(question.content, chunks, groupConfig);
+
         const postResult = await answerPoster.post(question.group_id, {
           content: answer.content,
           message_type: "answer",
           parent_message_id: question.id,
         });
+
         if (!postResult.success) {
           throw new Error(
             `Answer post failed for group_id=${question.group_id}, message_id=${question.id} (httpStatus=${postResult.httpStatus}, deadLettered=${postResult.deadLettered})`,
           );
         }
+
+        const totalMs = Date.now() - pipelineStart;
+
+        this.logger.info(
+          {
+            group: groupConfig.slug,
+            questionId: question.id,
+            embeddingsInitMs: retrieveResult.timingMs.embeddingsInit,
+            chromadbQueryMs: retrieveResult.timingMs.chromadbQuery,
+            llmGenerateMs: answer.llmMs,
+            answerPostMs: postResult.durationMs,
+            totalMs,
+          },
+          `[timing] group=${groupConfig.slug} question_id=${question.id} embeddings_init=${retrieveResult.timingMs.embeddingsInit}ms chromadb_query=${retrieveResult.timingMs.chromadbQuery}ms llm_generate=${answer.llmMs}ms answer_post=${postResult.durationMs}ms total=${totalMs}ms`,
+        );
       },
     });
 

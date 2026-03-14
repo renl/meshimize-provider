@@ -323,7 +323,8 @@ describe("rag-pipeline", () => {
     const pipeline = new RagPipeline(createTestOptions());
     const group = createTestGroup(tempDir);
 
-    const chunks = await pipeline.retrieve(group, "How do I deploy?");
+    const result = await pipeline.retrieve(group, "How do I deploy?");
+    const chunks = result.chunks;
 
     expect(chunks).toHaveLength(2);
     expect(chunks[0].content).toBe("Document content 1");
@@ -333,6 +334,13 @@ describe("rag-pipeline", () => {
     expect(chunks[1].content).toBe("Document content 2");
     expect(chunks[1].source).toBe("file2.md");
     expect(chunks[1].score).toBeCloseTo(0.3, 5);
+
+    // Timing info should be present
+    expect(result.timingMs).toBeDefined();
+    expect(typeof result.timingMs.embeddingsInit).toBe("number");
+    expect(typeof result.timingMs.chromadbQuery).toBe("number");
+    expect(result.timingMs.embeddingsInit).toBeGreaterThanOrEqual(0);
+    expect(result.timingMs.chromadbQuery).toBeGreaterThanOrEqual(0);
   });
 
   it("should default to Infinity score when distances are missing", async () => {
@@ -346,7 +354,8 @@ describe("rag-pipeline", () => {
     const pipeline = new RagPipeline(createTestOptions());
     const group = createTestGroup(tempDir);
 
-    const chunks = await pipeline.retrieve(group, "test query");
+    const result = await pipeline.retrieve(group, "test query");
+    const chunks = result.chunks;
 
     expect(chunks).toHaveLength(1);
     expect(chunks[0].content).toBe("Some content");

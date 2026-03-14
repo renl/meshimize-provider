@@ -30,6 +30,14 @@ export interface IngestResult {
   durationMs: number;
 }
 
+export interface RetrieveResult {
+  chunks: RetrievedChunk[];
+  timingMs: {
+    embeddingsInit: number;
+    chromadbQuery: number;
+  };
+}
+
 export interface ValidationResult {
   groupId: string;
   groupName: string;
@@ -135,6 +143,10 @@ function sleep(ms: number): Promise<void> {
 
 export class RagPipeline {
   private client: ChromaClient;
+  private embeddingsPromise: Promise<{
+    embedDocuments: (texts: string[]) => Promise<number[][]>;
+    embedQuery: (text: string) => Promise<number[]>;
+  }> | null = null;
 
   constructor(private readonly options: RagPipelineOptions) {
     // Validate persistDirectory is an HTTP(S) URL (ChromaDB JS client requires a server URL)
@@ -195,6 +207,19 @@ export class RagPipeline {
         ? { configuration: { baseURL: this.options.embeddingBaseUrl } }
         : {}),
     });
+  }
+
+  /**
+   * Get or lazily create the cached OpenAIEmbeddings instance.
+   */
+  private getOrCreateEmbeddingsInstance(): Promise<{
+    embedDocuments: (texts: string[]) => Promise<number[][]>;
+    embedQuery: (text: string) => Promise<number[]>;
+  }> {
+    if (!this.embeddingsPromise) {
+      this.embeddingsPromise = this.createEmbeddingsInstance();
+    }
+    return this.embeddingsPromise;
   }
 
   /**
@@ -299,7 +324,7 @@ export class RagPipeline {
     }
 
     // Create embeddings
-    const embeddingsInstance = await this.createEmbeddingsInstance();
+    const embeddingsInstance = await this.getOrCreateEmbeddingsInstance();
 
     const texts = allChunks.map((c) => c.text);
     const embeddings = await this.embedInBatches(
@@ -370,7 +395,7 @@ export class RagPipeline {
         return true;
       }
 
-      const embeddingsInstance = await this.createEmbeddingsInstance();
+      const embeddingsInstance = await this.getOrCreateEmbeddingsInstance();
       const embeddingFunction = createEmbeddingFunction(
         embeddingsInstance.embedDocuments.bind(embeddingsInstance),
         embeddingsInstance.embedQuery.bind(embeddingsInstance),
@@ -418,10 +443,11 @@ export class RagPipeline {
   /**
    * Retrieve top-K relevant chunks for a query.
    */
-  async retrieve(group: GroupConfig, query: string): Promise<RetrievedChunk[]> {
+  async retrieve(group: GroupConfig, query: string): Promise<RetrieveResult> {
     const collectionName = this.getCollectionName(group);
 
-    const embeddingsInstance = await this.createEmbeddingsInstance();
+    const t0 = Date.now();
+    const embeddingsInstance = await this.getOrCreateEmbeddingsInstance();
     const embeddingFunction = createEmbeddingFunction(
       embeddingsInstance.embedDocuments.bind(embeddingsInstance),
       embeddingsInstance.embedQuery.bind(embeddingsInstance),
@@ -431,11 +457,14 @@ export class RagPipeline {
       name: collectionName,
       embeddingFunction,
     });
+    const embeddingsInitMs = Date.now() - t0;
 
+    const t1 = Date.now();
     const results = await collection.query({
       queryTexts: query,
       nResults: group.top_k,
     });
+    const chromadbQueryMs = Date.now() - t1;
 
     const chunks: RetrievedChunk[] = [];
 
@@ -454,7 +483,13 @@ export class RagPipeline {
       }
     }
 
-    return chunks;
+    return {
+      chunks,
+      timingMs: {
+        embeddingsInit: embeddingsInitMs,
+        chromadbQuery: chromadbQueryMs,
+      },
+    };
   }
 
   /**
@@ -480,7 +515,7 @@ export class RagPipeline {
         };
       }
 
-      const embeddingsInstance = await this.createEmbeddingsInstance();
+      const embeddingsInstance = await this.getOrCreateEmbeddingsInstance();
       const embeddingFunction = createEmbeddingFunction(
         embeddingsInstance.embedDocuments.bind(embeddingsInstance),
         embeddingsInstance.embedQuery.bind(embeddingsInstance),

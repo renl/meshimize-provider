@@ -56,7 +56,10 @@ const mockIngest = vi.fn().mockResolvedValue({
   chunkCount: 20,
   durationMs: 100,
 });
-const mockRetrieve = vi.fn().mockResolvedValue([]);
+const mockRetrieve = vi.fn().mockResolvedValue({
+  chunks: [],
+  timingMs: { embeddingsInit: 0, chromadbQuery: 0 },
+});
 
 vi.mock("../src/rag-pipeline.js", () => ({
   RagPipeline: vi.fn().mockImplementation(() => ({
@@ -98,6 +101,7 @@ const mockPost = vi.fn().mockResolvedValue({
   success: true,
   httpStatus: 201,
   deadLettered: false,
+  durationMs: 50,
 });
 
 vi.mock("../src/answer-poster.js", () => ({
@@ -199,7 +203,10 @@ describe("LifecycleManager", () => {
       chunkCount: 20,
       durationMs: 100,
     });
-    mockRetrieve.mockReset().mockResolvedValue([]);
+    mockRetrieve.mockReset().mockResolvedValue({
+      chunks: [],
+      timingMs: { embeddingsInit: 0, chromadbQuery: 0 },
+    });
     mockGenerate.mockReset().mockResolvedValue({
       content: "Test answer",
       answerType: "llm_answer",
@@ -211,6 +218,7 @@ describe("LifecycleManager", () => {
       success: true,
       httpStatus: 201,
       deadLettered: false,
+      durationMs: 50,
     });
     mockHeartbeat.mockReset().mockResolvedValue({ "nanosecond heartbeat": 1234567890 });
   });
