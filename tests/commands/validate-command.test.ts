@@ -22,7 +22,10 @@ vi.mock("../../src/rag-pipeline.js", () => {
         durationMs: 0,
       }),
       needsIngestion: vi.fn().mockResolvedValue(true),
-      retrieve: vi.fn().mockResolvedValue([]),
+      retrieve: vi.fn().mockResolvedValue({
+        chunks: [],
+        timingMs: { embeddingsInit: 0, chromadbQuery: 0 },
+      }),
       validate: mockValidate,
     })),
   };

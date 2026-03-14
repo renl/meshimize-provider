@@ -14,6 +14,7 @@ export interface PostResult {
   success: boolean;
   httpStatus: number;
   deadLettered: boolean;
+  durationMs: number;
 }
 
 export class AnswerPoster {
@@ -24,6 +25,7 @@ export class AnswerPoster {
   }
 
   async post(groupId: string, answer: OutgoingAnswer): Promise<PostResult> {
+    const postStart = Date.now();
     const url = `${this.options.serverUrl.replace(/\/$/, "")}/api/v1/groups/${groupId}/messages`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -54,7 +56,12 @@ export class AnswerPoster {
         if (response.ok) {
           // Consume the response body so the underlying socket can be reused (Node/undici).
           await response.body?.cancel();
-          return { success: true, httpStatus: response.status, deadLettered: false };
+          return {
+            success: true,
+            httpStatus: response.status,
+            deadLettered: false,
+            durationMs: Date.now() - postStart,
+          };
         }
 
         // HTTP 429 — rate limited; read Retry-After, wait, retry (NOT counted as failure)
@@ -77,7 +84,12 @@ export class AnswerPoster {
               },
               "DEAD_LETTER: Rate limit retries exhausted",
             );
-            return { success: false, httpStatus: 429, deadLettered: true };
+            return {
+              success: false,
+              httpStatus: 429,
+              deadLettered: true,
+              durationMs: Date.now() - postStart,
+            };
           }
 
           const retryAfterRaw = response.headers.get("Retry-After");
@@ -113,7 +125,12 @@ export class AnswerPoster {
             },
             "DEAD_LETTER: Answer post failed after retry",
           );
-          return { success: false, httpStatus: lastStatus, deadLettered: true };
+          return {
+            success: false,
+            httpStatus: lastStatus,
+            deadLettered: true,
+            durationMs: Date.now() - postStart,
+          };
         }
 
         // Wait 2s before retry
@@ -140,7 +157,12 @@ export class AnswerPoster {
             },
             "DEAD_LETTER: Answer post failed after retry",
           );
-          return { success: false, httpStatus: lastStatus, deadLettered: true };
+          return {
+            success: false,
+            httpStatus: lastStatus,
+            deadLettered: true,
+            durationMs: Date.now() - postStart,
+          };
         }
 
         this.options.logger.warn(

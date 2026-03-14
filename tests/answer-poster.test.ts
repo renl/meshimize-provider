@@ -59,7 +59,12 @@ describe("AnswerPoster", () => {
     const resultPromise = poster.post("group-abc", answer);
     const result = await resultPromise;
 
-    expect(result).toEqual({ success: true, httpStatus: 201, deadLettered: false });
+    expect(result).toEqual({
+      success: true,
+      httpStatus: 201,
+      deadLettered: false,
+      durationMs: expect.any(Number),
+    });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
@@ -101,7 +106,12 @@ describe("AnswerPoster", () => {
     const result = await resultPromise;
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({ success: true, httpStatus: 201, deadLettered: false });
+    expect(result).toEqual({
+      success: true,
+      httpStatus: 201,
+      deadLettered: false,
+      durationMs: expect.any(Number),
+    });
   });
 
   it("should dead-letter after second failure and log DEAD_LETTER error", async () => {
@@ -127,7 +137,12 @@ describe("AnswerPoster", () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({ success: false, httpStatus: 502, deadLettered: true });
+    expect(result).toEqual({
+      success: false,
+      httpStatus: 502,
+      deadLettered: true,
+      durationMs: expect.any(Number),
+    });
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
     // Verify DEAD_LETTER log — pino pattern: logger.error(obj, "message")
@@ -160,7 +175,12 @@ describe("AnswerPoster", () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({ success: true, httpStatus: 201, deadLettered: false });
+    expect(result).toEqual({
+      success: true,
+      httpStatus: 201,
+      deadLettered: false,
+      durationMs: expect.any(Number),
+    });
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
@@ -228,6 +248,8 @@ describe("AnswerPoster", () => {
     expect(result.success).toBe(true);
     expect(result.httpStatus).toBe(201);
     expect(result.deadLettered).toBe(false);
+    expect(typeof result.durationMs).toBe("number");
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("should handle concurrent posts to different groups independently", async () => {
@@ -245,8 +267,18 @@ describe("AnswerPoster", () => {
       poster.post("group-bbb", createMockAnswer({ parent_message_id: "msg-bbb" })),
     ]);
 
-    expect(result1).toEqual({ success: true, httpStatus: 201, deadLettered: false });
-    expect(result2).toEqual({ success: true, httpStatus: 201, deadLettered: false });
+    expect(result1).toEqual({
+      success: true,
+      httpStatus: 201,
+      deadLettered: false,
+      durationMs: expect.any(Number),
+    });
+    expect(result2).toEqual({
+      success: true,
+      httpStatus: 201,
+      deadLettered: false,
+      durationMs: expect.any(Number),
+    });
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
     // Verify different URLs were called
@@ -313,7 +345,12 @@ describe("AnswerPoster", () => {
 
     const result = await resultPromise;
 
-    expect(result).toEqual({ success: true, httpStatus: 201, deadLettered: false });
+    expect(result).toEqual({
+      success: true,
+      httpStatus: 201,
+      deadLettered: false,
+      durationMs: expect.any(Number),
+    });
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
@@ -329,7 +366,12 @@ describe("AnswerPoster", () => {
 
     const result = await poster.post("group-abc", createMockAnswer());
 
-    expect(result).toEqual({ success: true, httpStatus: 200, deadLettered: false });
+    expect(result).toEqual({
+      success: true,
+      httpStatus: 200,
+      deadLettered: false,
+      durationMs: expect.any(Number),
+    });
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -16,7 +16,10 @@ vi.mock("../../src/rag-pipeline.js", () => {
     RagPipeline: vi.fn().mockImplementation(() => ({
       ingest: mockIngest,
       needsIngestion: vi.fn().mockResolvedValue(true),
-      retrieve: vi.fn().mockResolvedValue([]),
+      retrieve: vi.fn().mockResolvedValue({
+        chunks: [],
+        timingMs: { embeddingsInit: 0, chromadbQuery: 0 },
+      }),
       validate: vi.fn().mockResolvedValue({ isValid: true }),
     })),
   };
