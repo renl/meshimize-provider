@@ -143,10 +143,10 @@ function sleep(ms: number): Promise<void> {
 
 export class RagPipeline {
   private client: ChromaClient;
-  private embeddingsInstance: {
+  private embeddingsPromise: Promise<{
     embedDocuments: (texts: string[]) => Promise<number[][]>;
     embedQuery: (text: string) => Promise<number[]>;
-  } | null = null;
+  }> | null = null;
 
   constructor(private readonly options: RagPipelineOptions) {
     // Validate persistDirectory is an HTTP(S) URL (ChromaDB JS client requires a server URL)
@@ -212,14 +212,14 @@ export class RagPipeline {
   /**
    * Get or lazily create the cached OpenAIEmbeddings instance.
    */
-  private async getOrCreateEmbeddingsInstance(): Promise<{
+  private getOrCreateEmbeddingsInstance(): Promise<{
     embedDocuments: (texts: string[]) => Promise<number[][]>;
     embedQuery: (text: string) => Promise<number[]>;
   }> {
-    if (!this.embeddingsInstance) {
-      this.embeddingsInstance = await this.createEmbeddingsInstance();
+    if (!this.embeddingsPromise) {
+      this.embeddingsPromise = this.createEmbeddingsInstance();
     }
-    return this.embeddingsInstance;
+    return this.embeddingsPromise;
   }
 
   /**
