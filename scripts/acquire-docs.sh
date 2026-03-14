@@ -274,7 +274,7 @@ acquire_phoenix_docs() {
     ["phoenix"]="https://github.com/phoenixframework/phoenix.git v ${phoenix_version}"
     ["phoenix_live_view"]="https://github.com/phoenixframework/phoenix_live_view.git v ${PHOENIX_LIVE_VIEW_VERSION:-v1.0.9}"
     ["phoenix_html"]="https://github.com/phoenixframework/phoenix_html.git v ${PHOENIX_HTML_VERSION:-v4.2.1}"
-    ["phoenix_ecto"]="https://github.com/phoenixframework/phoenix_ecto.git v ${PHOENIX_ECTO_VERSION:-v4.6.4}"
+    ["phoenix_ecto"]="https://github.com/phoenixframework/phoenix_ecto.git v ${PHOENIX_ECTO_VERSION:-v4.6.3}"
     ["phoenix_pubsub"]="https://github.com/phoenixframework/phoenix_pubsub.git v ${PHOENIX_PUBSUB_VERSION:-v2.1.3}"
   )
 
