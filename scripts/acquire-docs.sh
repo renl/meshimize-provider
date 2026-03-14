@@ -313,14 +313,17 @@ acquire_phoenix_docs() {
       cd "${lib_src}"
       export MIX_HOME="${DOCS_DIR}/.mix"
       export HEX_HOME="${DOCS_DIR}/.hex"
+      export MIX_ENV=docs
       mix local.hex --force --if-missing
       mix local.rebar --force --if-missing
 
       # Ensure ex_doc is available for `mix docs`.
-      # Some Phoenix ecosystem libs don't include ex_doc as a dependency.
+      # Some Phoenix ecosystem libs don't include ex_doc as a dependency,
+      # others restrict it to specific Mix environments (only: :docs or only: :dev).
+      # We inject it without env restriction if not present, and always run in MIX_ENV=docs.
       if ! grep -q ':ex_doc' mix.exs; then
         echo "  Injecting ex_doc dependency into mix.exs..."
-        sed -i '/def\(p\)\{0,1\} deps do/,/\[/ s/\[/[\n      {:ex_doc, "~> 0.34", only: :dev, runtime: false},/' mix.exs
+        sed -i '/def\(p\)\{0,1\} deps do/,/\[/ s/\[/[\n      {:ex_doc, "~> 0.34", runtime: false},/' mix.exs
       fi
 
       mix deps.get
