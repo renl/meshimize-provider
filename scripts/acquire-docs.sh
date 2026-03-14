@@ -74,6 +74,8 @@ acquire_elixir_docs() {
   echo "Building Elixir docs with ExDoc (Elixir ${elixir_version}, ExDoc ${exdoc_version})..."
 
   mkdir -p "${DOCS_DIR}"
+  local abs_docs_dir
+  abs_docs_dir="$(cd "${DOCS_DIR}" && pwd)"
 
   # ── Step 1: Clone or update Elixir source ──
   if [ -d "${elixir_dir}/.git" ]; then
@@ -118,8 +120,8 @@ acquire_elixir_docs() {
   (
     cd "${exdoc_dir}"
     export PATH="${elixir_abs}/bin:${PATH}"
-    export MIX_HOME="${DOCS_DIR}/.mix"
-    export HEX_HOME="${DOCS_DIR}/.hex"
+    export MIX_HOME="${abs_docs_dir}/.mix"
+    export HEX_HOME="${abs_docs_dir}/.hex"
     mix local.hex --force --if-missing
     mix deps.get
     mix escript.build
@@ -256,6 +258,8 @@ acquire_phoenix_docs() {
   echo "Building Phoenix ecosystem docs (Phoenix ${phoenix_version})..."
 
   mkdir -p "${DOCS_DIR}"
+  local abs_docs_dir
+  abs_docs_dir="$(cd "${DOCS_DIR}" && pwd)"
 
   # Clean and prepare target directory
   rm -rf "${target}"
@@ -311,8 +315,8 @@ acquire_phoenix_docs() {
     echo "  Compiling and generating docs..."
     (
       cd "${lib_src}"
-      export MIX_HOME="${DOCS_DIR}/.mix"
-      export HEX_HOME="${DOCS_DIR}/.hex"
+      export MIX_HOME="${abs_docs_dir}/.mix"
+      export HEX_HOME="${abs_docs_dir}/.hex"
       export MIX_ENV=docs
       mix local.hex --force --if-missing
       mix local.rebar --force --if-missing
