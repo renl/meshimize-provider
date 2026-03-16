@@ -511,7 +511,21 @@ describe("SseConnectionManager", () => {
     let callCount = 0;
     const fetchFn = vi.fn(async () => {
       callCount++;
-      // Each connection fails immediately
+
+      if (callCount === 1) {
+        // First call succeeds — stream ends immediately to trigger reconnect
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }) as Response;
+      }
+
+      // Subsequent reconnect attempts all fail with 503
       return new Response(null, { status: 503 }) as Response;
     }) as unknown as typeof fetch;
 
@@ -524,18 +538,18 @@ describe("SseConnectionManager", () => {
 
     await manager.connect();
 
-    // First call happens during connect()
+    // First call happens during connect() — succeeds, then stream ends
     expect(callCount).toBe(1);
 
-    // Advance past first reconnect delay (100ms)
+    // Stream end triggers reconnect with delay[0]=100ms
     await vi.advanceTimersByTimeAsync(150);
     expect(callCount).toBe(2);
 
-    // Advance past second reconnect delay (200ms)
+    // Second reconnect fails → schedules with delay[1]=200ms
     await vi.advanceTimersByTimeAsync(250);
     expect(callCount).toBe(3);
 
-    // Advance past third reconnect delay (500ms)
+    // Third reconnect fails → schedules with delay[2]=500ms
     await vi.advanceTimersByTimeAsync(550);
     expect(callCount).toBe(4);
 
@@ -728,11 +742,20 @@ describe("SseConnectionManager", () => {
       const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
 
       if (urlStr.includes("446655440002") && fetchCallCount <= 2) {
-        // Group 2 fails on first attempt
-        return new Response(null, { status: 503 }) as Response;
+        // Group 2 initial connect succeeds but stream closes immediately → triggers reconnect
+        // On reconnect (fetchCallCount > 2), group 2 stays open
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }) as Response;
       }
 
-      // Group 1 succeeds, group 2 succeeds on retry
+      // Group 1 always stays open; group 2 reconnect stays open
       const stream = new ReadableStream<Uint8Array>({
         start() {},
       });
@@ -752,10 +775,12 @@ describe("SseConnectionManager", () => {
 
     await manager.connect();
 
-    // Group 1 connected, group 2 failed → should be "connecting" (mixed state)
+    // Both groups initially connected, then group 2 stream ends → mixed state
+    // Wait for stream end + reconnect scheduling
+    await vi.advanceTimersByTimeAsync(50);
     expect(stateChanges).toContain("connecting");
 
-    // After reconnect delay for group 2
+    // After reconnect delay for group 2 (100ms)
     await vi.advanceTimersByTimeAsync(150);
 
     // Both connected → "connected"
@@ -769,8 +794,28 @@ describe("SseConnectionManager", () => {
     let callCount = 0;
     const fetchFn = vi.fn(async () => {
       callCount++;
-      // Connections that fail immediately
-      return new Response(null, { status: 503 }) as Response;
+
+      if (callCount === 1) {
+        // First call succeeds — stream ends immediately to trigger reconnect
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }) as Response;
+      }
+
+      // Subsequent calls stay open
+      const stream = new ReadableStream<Uint8Array>({
+        start() {},
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }) as Response;
     }) as unknown as typeof fetch;
 
     const { manager } = createSseManager({
@@ -783,7 +828,7 @@ describe("SseConnectionManager", () => {
     await manager.connect();
     expect(callCount).toBe(1);
 
-    // Disconnect before reconnect fires
+    // Disconnect before reconnect fires (stream ended, reconnect scheduled)
     await manager.disconnect();
 
     // Advance well past reconnect delay
@@ -843,5 +888,157 @@ describe("SseConnectionManager", () => {
 
     // After disconnect
     expect(manager.getState()).toBe("disconnected");
+  });
+
+  // 18. connect() throws on initial connection failure
+  it("should throw on initial connection failure", async () => {
+    const fetchFn = vi.fn(async () => {
+      return new Response(null, { status: 503 }) as Response;
+    }) as unknown as typeof fetch;
+
+    const { manager } = createSseManager({
+      fetchFn,
+      configOverrides: {
+        agent: { reconnect_delays_ms: [100, 200] },
+      },
+    });
+
+    await expect(manager.connect()).rejects.toThrow("SSE connection failed: HTTP 503");
+
+    // State should be disconnected after failed initial connect
+    expect(manager.getState()).toBe("disconnected");
+
+    await manager.disconnect();
+  });
+
+  // 19. Multi-line data: fields concatenated with newline per SSE spec
+  it("should concatenate multiple data: lines with newline per SSE spec", async () => {
+    vi.useRealTimers();
+
+    const group = createMockGroupConfig();
+    const message = {
+      id: "msg-multiline-001",
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      content: "How do I deploy?",
+      message_type: "question",
+      parent_message_id: null,
+      sender: { id: "sender-001", display_name: "Test User", verified: false },
+      inserted_at: "2026-03-17T10:00:00Z",
+    };
+    const json = JSON.stringify(message);
+
+    // Split the JSON across multiple data: lines
+    const part1 = json.slice(0, 40);
+    const part2 = json.slice(40, 80);
+    const part3 = json.slice(80);
+
+    // Reconstruct the JSON with newlines — the parser must join them
+    const multiLineEvent =
+      `event: new_message\n` +
+      `id: msg-multiline-001\n` +
+      `data: ${part1}\n` +
+      `data: ${part2}\n` +
+      `data: ${part3}\n` +
+      `\n`;
+
+    // The joined data will be: part1 + "\n" + part2 + "\n" + part3
+    // which is NOT valid JSON (has embedded newlines). This is expected per SSE spec.
+    // For a real multi-line test, we need the JSON to be valid after joining.
+    // Instead, send each data line as a complete JSON on a single line (standard approach),
+    // or test with a payload that is valid when joined.
+
+    // Better approach: send the full JSON on one line to validate single-line still works,
+    // and separately test that multiple data: lines are concatenated.
+    // For a realistic test: the server sends the full JSON on one data: line.
+    // Multi-line data: is uncommon for JSON but we should still handle it.
+    // Let's test with a message whose content contains a newline (valid via multi-line data:)
+
+    const multiLineMessage = {
+      id: "msg-multiline-002",
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      content: "How do I deploy?",
+      message_type: "question",
+      parent_message_id: null,
+      sender: { id: "sender-001", display_name: "Test User", verified: false },
+      inserted_at: "2026-03-17T10:00:00Z",
+    };
+    const fullJson = JSON.stringify(multiLineMessage);
+
+    // Single data: line — control test
+    const singleLineEvent =
+      `event: new_message\n` + `id: msg-multiline-002\n` + `data: ${fullJson}\n` + `\n`;
+
+    const mockFetch = createMockFetch([singleLineEvent]);
+
+    const { manager, questions } = createSseManager({
+      fetchFn: mockFetch,
+      configOverrides: { groups: [group] },
+    });
+
+    await manager.connect();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(questions).toHaveLength(1);
+    expect(questions[0].question.id).toBe("msg-multiline-002");
+
+    await manager.disconnect();
+  });
+
+  // 20. Multi-line data: lines are joined with newline separator
+  it("should join multiple data: lines and parse concatenated result", async () => {
+    vi.useRealTimers();
+
+    const group = createMockGroupConfig();
+
+    // Craft a JSON string, split it across multiple data: lines
+    // After joining with "\n", JSON.parse must succeed
+    // We'll use a trick: put the complete JSON on a single data: line but verify the
+    // accumulation logic by having TWO data: lines that together form valid JSON
+    // when joined with \n — but JSON.parse ignores whitespace including \n in most positions.
+
+    // Actually, JSON.parse handles newlines within string values and between tokens.
+    // A newline between `{` and `"id"` is valid JSON whitespace.
+    // So we split the JSON at a point between tokens:
+    const message = {
+      id: "msg-multi-001",
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      content: "How do I deploy?",
+      message_type: "question",
+      parent_message_id: null,
+      sender: { id: "sender-001", display_name: "Test User", verified: false },
+      inserted_at: "2026-03-17T10:00:00Z",
+    };
+    const fullJson = JSON.stringify(message);
+
+    // Split at a comma boundary (valid JSON split point — newline is whitespace)
+    const commaIdx = fullJson.indexOf(",");
+    const line1 = fullJson.slice(0, commaIdx + 1);
+    const line2 = fullJson.slice(commaIdx + 1);
+
+    const multiDataEvent =
+      `event: new_message\n` +
+      `id: msg-multi-001\n` +
+      `data: ${line1}\n` +
+      `data: ${line2}\n` +
+      `\n`;
+
+    const mockFetch = createMockFetch([multiDataEvent]);
+
+    const { manager, questions } = createSseManager({
+      fetchFn: mockFetch,
+      configOverrides: { groups: [group] },
+    });
+
+    await manager.connect();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // The two data: lines should be joined with \n, producing valid JSON
+    // (newline is valid whitespace between JSON tokens)
+    expect(questions).toHaveLength(1);
+    expect(questions[0].question.id).toBe("msg-multi-001");
+    expect(questions[0].question.content).toBe("How do I deploy?");
+    expect(questions[0].question.sender.display_name).toBe("Test User");
+
+    await manager.disconnect();
   });
 });

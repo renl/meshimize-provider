@@ -45,6 +45,7 @@ export class SseConnectionManager {
 
   private groupConnections: Map<string, GroupConnectionState> = new Map();
   private explicitDisconnect: boolean = false;
+  private initialConnect: boolean = false;
   private aggregateState: ConnectionState = "disconnected";
 
   constructor(options: SseConnectionManagerOptions) {
@@ -79,9 +80,13 @@ export class SseConnectionManager {
     }
 
     // Open all connections concurrently
-    const connectPromises = this.config.groups.map((group) => this.connectGroup(group.group_id));
-
-    await Promise.all(connectPromises);
+    this.initialConnect = true;
+    try {
+      const connectPromises = this.config.groups.map((group) => this.connectGroup(group.group_id));
+      await Promise.all(connectPromises);
+    } finally {
+      this.initialConnect = false;
+    }
   }
 
   /** Closes all SSE connections and cleans up */
@@ -218,6 +223,11 @@ export class SseConnectionManager {
       conn.abortController = null;
       this.updateAggregateState();
 
+      // On initial connect, propagate the error to the caller
+      if (this.initialConnect) {
+        throw err;
+      }
+
       // Schedule reconnection
       this.scheduleReconnect(groupId);
     }
@@ -317,7 +327,7 @@ export class SseConnectionManager {
 
       let eventType = "";
       let eventId = "";
-      let eventData = "";
+      const dataLines: string[] = [];
 
       for (const line of lines) {
         if (line.startsWith(":")) {
@@ -330,9 +340,11 @@ export class SseConnectionManager {
         } else if (line.startsWith("id:")) {
           eventId = line.slice(3).trim();
         } else if (line.startsWith("data:")) {
-          eventData = line.slice(5).trim();
+          dataLines.push(line.startsWith("data: ") ? line.slice(6) : line.slice(5));
         }
       }
+
+      const eventData = dataLines.join("\n");
 
       // Track last event ID
       if (eventId) {
@@ -478,19 +490,21 @@ export class SseConnectionManager {
     const conn = this.groupConnections.get(groupId);
     if (!conn) return;
 
-    const delay = getReconnectDelay(conn.reconnectAttempt, this.config.agent.reconnect_delays_ms);
-    conn.reconnectAttempt += 1;
+    const currentAttempt = conn.reconnectAttempt;
+    const delay = getReconnectDelay(currentAttempt, this.config.agent.reconnect_delays_ms);
 
     this.logger.info(
       {
         transport: "sse",
         groupId,
-        reconnectAttempt: conn.reconnectAttempt,
+        reconnectAttempt: currentAttempt,
         reconnectDelayMs: delay,
         lastEventId: conn.lastEventId,
       },
       "Scheduling SSE reconnection",
     );
+
+    conn.reconnectAttempt = currentAttempt + 1;
 
     conn.reconnectTimer = setTimeout(() => {
       conn.reconnectTimer = null;
