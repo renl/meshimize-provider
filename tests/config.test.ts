@@ -540,4 +540,82 @@ describe("config", () => {
 
     expect(() => loadConfig(configPath)).toThrow();
   });
+
+  // ─── Transport config tests ───
+
+  it("should default transport to websocket when not specified", () => {
+    const configPath = writeYamlConfig(tempDir, validConfig());
+    const config = loadConfig(configPath);
+
+    expect(config.meshimize.transport).toBe("websocket");
+  });
+
+  it('should parse transport: "sse" from YAML', () => {
+    const cfg = validConfig();
+    (cfg.meshimize as Record<string, unknown>).transport = "sse";
+    const configPath = writeYamlConfig(tempDir, cfg);
+    const config = loadConfig(configPath);
+
+    expect(config.meshimize.transport).toBe("sse");
+  });
+
+  it("should reject invalid transport value", () => {
+    const cfg = validConfig();
+    (cfg.meshimize as Record<string, unknown>).transport = "http";
+    const configPath = writeYamlConfig(tempDir, cfg);
+
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+
+  it("should override transport from MESHIMIZE_TRANSPORT env var", () => {
+    const originalEnv = process.env.MESHIMIZE_TRANSPORT;
+    try {
+      process.env.MESHIMIZE_TRANSPORT = "sse";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.meshimize.transport).toBe("sse");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.MESHIMIZE_TRANSPORT;
+      } else {
+        process.env.MESHIMIZE_TRANSPORT = originalEnv;
+      }
+    }
+  });
+
+  // ─── SSE keepalive timeout config tests ───
+
+  it("should default sse_keepalive_timeout_ms to 90000", () => {
+    const configPath = writeYamlConfig(tempDir, validConfig());
+    const config = loadConfig(configPath);
+
+    expect(config.agent.sse_keepalive_timeout_ms).toBe(90000);
+  });
+
+  it("should override sse_keepalive_timeout_ms from SSE_KEEPALIVE_TIMEOUT_MS env var", () => {
+    const originalEnv = process.env.SSE_KEEPALIVE_TIMEOUT_MS;
+    try {
+      process.env.SSE_KEEPALIVE_TIMEOUT_MS = "60000";
+      const configPath = writeYamlConfig(tempDir, validConfig());
+      const config = loadConfig(configPath);
+
+      expect(config.agent.sse_keepalive_timeout_ms).toBe(60000);
+      expect(typeof config.agent.sse_keepalive_timeout_ms).toBe("number");
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.SSE_KEEPALIVE_TIMEOUT_MS;
+      } else {
+        process.env.SSE_KEEPALIVE_TIMEOUT_MS = originalEnv;
+      }
+    }
+  });
+
+  it("should reject sse_keepalive_timeout_ms below minimum (10000)", () => {
+    const cfg = validConfig();
+    cfg.agent = { sse_keepalive_timeout_ms: 5000 };
+    const configPath = writeYamlConfig(tempDir, cfg);
+
+    expect(() => loadConfig(configPath)).toThrow();
+  });
 });

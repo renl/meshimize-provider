@@ -20,6 +20,7 @@ const MeshimizeServerSchema = z.object({
   server_url: z.string().url(),
   api_key: z.string().min(1),
   ws_path: z.string().default("/socket/websocket"),
+  transport: z.enum(["websocket", "sse"]).default("websocket"),
 });
 
 const LLMSchema = z.object({
@@ -63,6 +64,7 @@ const AgentSchema = z.object({
   health_summary_interval_s: z.number().int().default(300),
   shutdown_timeout_ms: z.number().int().default(10000),
   log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  sse_keepalive_timeout_ms: z.number().int().min(10000).max(300000).default(90000),
 });
 
 export const ConfigSchema = z.object({
@@ -98,6 +100,12 @@ const ENV_MAPPINGS: EnvMapping[] = [
   { envKey: "EMBEDDING_BATCH_SIZE", configPath: "embedding.batch_size", type: "number" },
   { envKey: "LOG_LEVEL", configPath: "agent.log_level", type: "string" },
   { envKey: "HEALTH_PORT", configPath: "agent.health_port", type: "number" },
+  { envKey: "MESHIMIZE_TRANSPORT", configPath: "meshimize.transport", type: "string" },
+  {
+    envKey: "SSE_KEEPALIVE_TIMEOUT_MS",
+    configPath: "agent.sse_keepalive_timeout_ms",
+    type: "number",
+  },
 ];
 
 function applyEnvOverrides(config: Record<string, unknown>): void {

@@ -48,6 +48,43 @@ vi.mock("../src/connection-manager.js", () => {
 
 // ─── Mock RagPipeline ───
 
+// ─── Mock SseConnectionManager ───
+
+vi.mock("../src/sse-connection-manager.js", () => {
+  const mockConnect = vi.fn().mockResolvedValue(undefined);
+  const mockDisconnect = vi.fn().mockResolvedValue(undefined);
+  const mockGetState = vi.fn().mockReturnValue("disconnected");
+
+  class MockSseConnectionManager {
+    connect = mockConnect;
+    disconnect = mockDisconnect;
+    getState = mockGetState;
+
+    constructor(public readonly options: Record<string, unknown>) {
+      MockSseConnectionManager.lastInstance = this;
+      MockSseConnectionManager.lastOptions = options;
+    }
+
+    static lastInstance: MockSseConnectionManager | null = null;
+    static lastOptions: Record<string, unknown> | null = null;
+    static mockConnect = mockConnect;
+    static mockDisconnect = mockDisconnect;
+    static mockGetState = mockGetState;
+
+    static resetAll(): void {
+      mockConnect.mockReset().mockResolvedValue(undefined);
+      mockDisconnect.mockReset().mockResolvedValue(undefined);
+      mockGetState.mockReset().mockReturnValue("disconnected");
+      MockSseConnectionManager.lastInstance = null;
+      MockSseConnectionManager.lastOptions = null;
+    }
+  }
+
+  return {
+    SseConnectionManager: MockSseConnectionManager,
+  };
+});
+
 const mockNeedsIngestion = vi.fn().mockResolvedValue(false);
 const mockIngest = vi.fn().mockResolvedValue({
   groupId: "test",
@@ -127,6 +164,20 @@ const MockConnectionManager = MockCM as unknown as {
   resetAll: () => void;
 };
 
+const { SseConnectionManager: MockSSE } = await import("../src/sse-connection-manager.js");
+const MockSseConnectionManager = MockSSE as unknown as {
+  lastInstance: {
+    options: Record<string, unknown>;
+    connect: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+  } | null;
+  lastOptions: Record<string, unknown> | null;
+  mockConnect: ReturnType<typeof vi.fn>;
+  mockDisconnect: ReturnType<typeof vi.fn>;
+  mockGetState: ReturnType<typeof vi.fn>;
+  resetAll: () => void;
+};
+
 // ─── Helpers ───
 
 function createMockLogger(): pino.Logger {
@@ -153,6 +204,7 @@ function createMockConfig(groups?: GroupConfig[]): Config {
       server_url: "https://api.meshimize.com",
       api_key: "test-api-key-123",
       ws_path: "/socket/websocket",
+      transport: "websocket",
     },
     llm: {
       provider: "openai",
@@ -183,6 +235,7 @@ function createMockConfig(groups?: GroupConfig[]): Config {
       health_summary_interval_s: 300,
       shutdown_timeout_ms: 10000,
       log_level: "info",
+      sse_keepalive_timeout_ms: 90000,
     },
     groups: groups ?? [createMockGroupConfig()],
   };
@@ -193,6 +246,7 @@ function createMockConfig(groups?: GroupConfig[]): Config {
 describe("LifecycleManager", () => {
   beforeEach(() => {
     MockConnectionManager.resetAll();
+    MockSseConnectionManager.resetAll();
     // Use mockReset() (not mockClear()) so that changed implementations
     // (e.g. .mockRejectedValue()) don't leak between tests, then re-apply defaults.
     mockNeedsIngestion.mockReset().mockResolvedValue(false);
@@ -496,5 +550,106 @@ describe("LifecycleManager", () => {
     expect(mockHeartbeat).toHaveBeenCalledTimes(1);
 
     await lm.shutdown();
+  });
+
+  // ─── SSE Transport Tests ───
+
+  it("should use WebSocket ConnectionManager when transport is websocket (default)", async () => {
+    const config = createMockConfig();
+    // Default transport is "websocket"
+    expect(config.meshimize.transport).toBe("websocket");
+
+    const lm = new LifecycleManager({
+      config,
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    await lm.start();
+
+    // WebSocket ConnectionManager should be instantiated
+    expect(MockConnectionManager.lastInstance).not.toBeNull();
+    expect(MockConnectionManager.mockConnect).toHaveBeenCalledTimes(1);
+    // SSE should NOT be instantiated
+    expect(MockSseConnectionManager.lastInstance).toBeNull();
+
+    await lm.shutdown();
+  });
+
+  it("should use SseConnectionManager when transport is sse", async () => {
+    const config = createMockConfig();
+    config.meshimize.transport = "sse";
+
+    const lm = new LifecycleManager({
+      config,
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    await lm.start();
+
+    // SSE ConnectionManager should be instantiated
+    expect(MockSseConnectionManager.lastInstance).not.toBeNull();
+    expect(MockSseConnectionManager.mockConnect).toHaveBeenCalledTimes(1);
+    // WebSocket should NOT be instantiated
+    expect(MockConnectionManager.lastInstance).toBeNull();
+
+    await lm.shutdown();
+  });
+
+  it("should skip joinGroup in SSE transport mode", async () => {
+    const group1 = createMockGroupConfig({
+      group_id: "550e8400-e29b-41d4-a716-446655440001",
+      group_name: "Group One",
+      slug: "group-one",
+    });
+    const group2 = createMockGroupConfig({
+      group_id: "550e8400-e29b-41d4-a716-446655440002",
+      group_name: "Group Two",
+      slug: "group-two",
+    });
+    const config = createMockConfig([group1, group2]);
+    config.meshimize.transport = "sse";
+
+    const lm = new LifecycleManager({
+      config,
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    await lm.start();
+
+    // SSE should be used
+    expect(MockSseConnectionManager.mockConnect).toHaveBeenCalledTimes(1);
+    // No joinGroup calls on WebSocket CM (it shouldn't even exist)
+    expect(MockConnectionManager.mockJoinGroup).not.toHaveBeenCalled();
+
+    // Groups should still be marked as ready
+    const router = lm.getQuestionRouter()!;
+    const stats = router.getStats();
+    expect(stats).toHaveLength(2);
+    expect(stats[0].status).toBe("ready");
+    expect(stats[1].status).toBe("ready");
+
+    await lm.shutdown();
+  });
+
+  it("should call disconnect on SseConnectionManager during shutdown", async () => {
+    const config = createMockConfig();
+    config.meshimize.transport = "sse";
+
+    const lm = new LifecycleManager({
+      config,
+      logger: createMockLogger(),
+      version: "0.1.0",
+    });
+
+    await lm.start();
+
+    expect(MockSseConnectionManager.lastInstance).not.toBeNull();
+
+    await lm.shutdown();
+
+    expect(MockSseConnectionManager.mockDisconnect).toHaveBeenCalledTimes(1);
   });
 });

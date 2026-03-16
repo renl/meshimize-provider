@@ -6,6 +6,8 @@ import type { ConnectionState } from "./types.js";
 import { ChromaClient } from "chromadb";
 import { ConnectionManager } from "./connection-manager.js";
 import type { ConnectionManagerOptions } from "./connection-manager.js";
+import { SseConnectionManager } from "./sse-connection-manager.js";
+import type { SseConnectionManagerOptions } from "./sse-connection-manager.js";
 import { RagPipeline } from "./rag-pipeline.js";
 import { QuestionRouter } from "./question-router.js";
 import { AnswerGenerator } from "./answer-generator.js";
@@ -20,7 +22,7 @@ export interface LifecycleManagerOptions {
 }
 
 export class LifecycleManager {
-  private connectionManager: ConnectionManager | null = null;
+  private connectionManager: ConnectionManager | SseConnectionManager | null = null;
   private ragPipeline: RagPipeline | null = null;
   private questionRouter: QuestionRouter | null = null;
   private answerGenerator: AnswerGenerator | null = null;
@@ -232,44 +234,80 @@ export class LifecycleManager {
       this.logger.warn({ groupId }, "Group marked as degraded due to ingestion failure");
     }
 
-    // 7. Create ConnectionManager with onQuestion wired to router.enqueue
+    // 7. Create transport manager and connect
     const router = this.questionRouter;
-    const cmOptions: ConnectionManagerOptions = {
-      config: this.config,
-      logger: this.logger,
-      onQuestion: (question, _groupConfig) => {
-        router.enqueue(question);
-      },
-      onConnectionStateChange: (state) => {
-        this.connectionState = state;
-        this.logger.info({ connectionState: state }, "Connection state changed");
-      },
-    };
+    const transport = this.config.meshimize.transport;
+    this.logger.info({ transport }, "Using transport");
 
-    this.connectionManager = new ConnectionManager(cmOptions);
-
-    // 8. Connect to server (REST auth + WebSocket)
-    await this.connectionManager.connect();
-
-    // 9. Join all groups from config
     let joinedCount = 0;
     let failedCount = 0;
-    for (const group of this.config.groups) {
-      try {
-        await this.connectionManager.joinGroup(group);
-        joinedCount++;
-        // Only set "ready" if not already degraded from ingestion failure
+
+    if (transport === "sse") {
+      // SSE path: create SseConnectionManager, call connect()
+      // No joinGroup() step — SSE connections are per-group from connect()
+      const sseOptions: SseConnectionManagerOptions = {
+        config: this.config,
+        logger: this.logger,
+        onQuestion: (question, _groupConfig) => {
+          router.enqueue(question);
+        },
+        onConnectionStateChange: (state) => {
+          this.connectionState = state;
+          this.logger.info({ connectionState: state }, "Connection state changed");
+        },
+      };
+
+      this.connectionManager = new SseConnectionManager(sseOptions);
+      await this.connectionManager.connect();
+
+      // After connect(), mark groups as "ready" (unless degraded from ingestion failure)
+      for (const group of this.config.groups) {
         if (!ingestionFailedGroupIds.has(group.group_id)) {
           this.questionRouter.updateGroupStatus(group.group_id, "ready");
         }
-        this.logger.info({ groupId: group.group_id, groupName: group.group_name }, "Joined group");
-      } catch (err) {
-        failedCount++;
-        this.questionRouter.updateGroupStatus(group.group_id, "degraded");
-        this.logger.error(
-          { err, groupId: group.group_id, groupName: group.group_name },
-          "Failed to join group",
-        );
+        joinedCount++;
+      }
+    } else {
+      // WebSocket path: existing flow — create ConnectionManager, connect(), joinGroup() per group
+      const cmOptions: ConnectionManagerOptions = {
+        config: this.config,
+        logger: this.logger,
+        onQuestion: (question, _groupConfig) => {
+          router.enqueue(question);
+        },
+        onConnectionStateChange: (state) => {
+          this.connectionState = state;
+          this.logger.info({ connectionState: state }, "Connection state changed");
+        },
+      };
+
+      const wsManager = new ConnectionManager(cmOptions);
+      this.connectionManager = wsManager;
+
+      // 8. Connect to server (REST auth + WebSocket)
+      await wsManager.connect();
+
+      // 9. Join all groups from config
+      for (const group of this.config.groups) {
+        try {
+          await wsManager.joinGroup(group);
+          joinedCount++;
+          // Only set "ready" if not already degraded from ingestion failure
+          if (!ingestionFailedGroupIds.has(group.group_id)) {
+            this.questionRouter.updateGroupStatus(group.group_id, "ready");
+          }
+          this.logger.info(
+            { groupId: group.group_id, groupName: group.group_name },
+            "Joined group",
+          );
+        } catch (err) {
+          failedCount++;
+          this.questionRouter.updateGroupStatus(group.group_id, "degraded");
+          this.logger.error(
+            { err, groupId: group.group_id, groupName: group.group_name },
+            "Failed to join group",
+          );
+        }
       }
     }
 

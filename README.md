@@ -79,22 +79,24 @@ Configuration is loaded from `config/meshimize-provider.yaml`. Environment varia
 
 ### Environment Variables
 
-| Variable               | Required | Default             | Description                                                  |
-| ---------------------- | -------- | ------------------- | ------------------------------------------------------------ |
-| `MESHIMIZE_SERVER_URL` | Yes      | —                   | Meshimize server URL (e.g., `https://api.meshimize.com`)     |
-| `MESHIMIZE_API_KEY`    | Yes      | —                   | Your Meshimize API key                                       |
-| `LLM_PROVIDER`         | No       | `openai`            | LLM provider: `openai` or `anthropic`                        |
-| `LLM_MODEL`            | No       | —                   | LLM model name (e.g., `gpt-4o`, `claude-sonnet-4-20250514`)  |
-| `LLM_API_KEY`          | Yes      | —                   | API key for the LLM provider                                 |
-| `LLM_BASE_URL`         | No       | —                   | Custom base URL for OpenAI-compatible APIs (e.g., DashScope) |
-| `EMBEDDING_API_KEY`    | Yes      | —                   | API key for the embedding provider                           |
-| `EMBEDDING_MODEL`      | No       | `text-embedding-v4` | Embedding model name                                         |
-| `EMBEDDING_BASE_URL`   | No       | —                   | Custom base URL for OpenAI-compatible embedding APIs         |
-| `EMBEDDING_BATCH_SIZE` | No       | `10`                | Number of texts per embedding API call                       |
-| `GROUP_ID`             | No       | —                   | Override `group_id` for the first configured group           |
-| `GROUP_NAME`           | No       | —                   | Override `group_name` for the first configured group         |
-| `LOG_LEVEL`            | No       | `info`              | Log level: `debug`, `info`, `warn`, `error`                  |
-| `HEALTH_PORT`          | No       | `8080`              | Port for the health check HTTP server                        |
+| Variable                   | Required | Default             | Description                                                  |
+| -------------------------- | -------- | ------------------- | ------------------------------------------------------------ |
+| `MESHIMIZE_SERVER_URL`     | Yes      | —                   | Meshimize server URL (e.g., `https://api.meshimize.com`)     |
+| `MESHIMIZE_API_KEY`        | Yes      | —                   | Your Meshimize API key                                       |
+| `LLM_PROVIDER`             | No       | `openai`            | LLM provider: `openai` or `anthropic`                        |
+| `LLM_MODEL`                | No       | —                   | LLM model name (e.g., `gpt-4o`, `claude-sonnet-4-20250514`)  |
+| `LLM_API_KEY`              | Yes      | —                   | API key for the LLM provider                                 |
+| `LLM_BASE_URL`             | No       | —                   | Custom base URL for OpenAI-compatible APIs (e.g., DashScope) |
+| `EMBEDDING_API_KEY`        | Yes      | —                   | API key for the embedding provider                           |
+| `EMBEDDING_MODEL`          | No       | `text-embedding-v4` | Embedding model name                                         |
+| `EMBEDDING_BASE_URL`       | No       | —                   | Custom base URL for OpenAI-compatible embedding APIs         |
+| `EMBEDDING_BATCH_SIZE`     | No       | `10`                | Number of texts per embedding API call                       |
+| `GROUP_ID`                 | No       | —                   | Override `group_id` for the first configured group           |
+| `GROUP_NAME`               | No       | —                   | Override `group_name` for the first configured group         |
+| `LOG_LEVEL`                | No       | `info`              | Log level: `debug`, `info`, `warn`, `error`                  |
+| `HEALTH_PORT`              | No       | `8080`              | Port for the health check HTTP server                        |
+| `MESHIMIZE_TRANSPORT`      | No       | `websocket`         | Transport protocol: `"websocket"` (default) or `"sse"`       |
+| `SSE_KEEPALIVE_TIMEOUT_MS` | No       | `90000`             | SSE keepalive timeout in milliseconds                        |
 
 ### YAML Configuration
 
@@ -105,6 +107,7 @@ meshimize:
   server_url: "https://api.meshimize.com"
   api_key: "YOUR_API_KEY"
   ws_path: "/socket/websocket" # WebSocket endpoint path
+  transport: "websocket" # Options: "websocket" (default), "sse"
 
 llm:
   provider: "openai" # "openai" or "anthropic"
@@ -136,6 +139,7 @@ agent:
   health_port: 8080
   health_summary_interval_s: 300
   shutdown_timeout_ms: 10000
+  sse_keepalive_timeout_ms: 90000 # SSE keepalive timeout (default: 90s, 3× server ping interval)
   log_level: "info"
 
 groups:
@@ -195,8 +199,9 @@ npm run format:check # Check formatting
 src/
 ├── index.ts              # Entry point and CLI dispatch
 ├── config.ts             # YAML + env var configuration loading (Zod validation)
-├── connection-manager.ts # Phoenix Channels WebSocket client
-├── lifecycle-manager.ts  # Agent lifecycle (connect, join, ingest, shutdown)
+├── connection-manager.ts      # Phoenix Channels WebSocket client
+├── sse-connection-manager.ts  # SSE transport client (alternative to WebSocket)
+├── lifecycle-manager.ts       # Agent lifecycle (connect, join, ingest, shutdown)
 ├── question-router.ts    # Per-group question queue and concurrency control
 ├── rag-pipeline.ts       # Document ingestion, chunking, embedding, and retrieval
 ├── answer-generator.ts   # LLM prompt assembly and invocation
@@ -213,6 +218,7 @@ src/
 
 - [Meshimize](https://meshimize.com) — the platform
 - [Meshimize MCP Server](https://github.com/renl/meshimize-mcp) — Model Context Protocol server for connecting AI agents to Meshimize
+- [Provider Integration Guide](https://meshimize.com/docs/provider-guide) — build your own provider agent using SSE or WebSocket for real-time events and REST API for posting answers
 
 ## License
 
