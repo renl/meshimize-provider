@@ -281,15 +281,16 @@ export class LifecycleManager {
         },
       };
 
-      this.connectionManager = new ConnectionManager(cmOptions);
+      const wsManager = new ConnectionManager(cmOptions);
+      this.connectionManager = wsManager;
 
       // 8. Connect to server (REST auth + WebSocket)
-      await this.connectionManager.connect();
+      await wsManager.connect();
 
       // 9. Join all groups from config
       for (const group of this.config.groups) {
         try {
-          await this.connectionManager.joinGroup(group);
+          await wsManager.joinGroup(group);
           joinedCount++;
           // Only set "ready" if not already degraded from ingestion failure
           if (!ingestionFailedGroupIds.has(group.group_id)) {

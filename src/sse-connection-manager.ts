@@ -32,6 +32,7 @@ interface GroupConnectionState {
   reconnectAttempt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   keepaliveTimer: ReturnType<typeof setTimeout> | null;
+  superseded: boolean;
 }
 
 // ─── SSE Connection Manager ───
@@ -76,6 +77,7 @@ export class SseConnectionManager {
         reconnectAttempt: 0,
         reconnectTimer: null,
         keepaliveTimer: null,
+        superseded: false,
       });
     }
 
@@ -263,6 +265,13 @@ export class SseConnectionManager {
         // Process complete events from the buffer
         buffer = this.processBuffer(groupId, buffer);
       }
+
+      // Flush any held partial multi-byte characters from the decoder
+      const remaining = decoder.decode();
+      if (remaining) {
+        buffer += remaining;
+        this.processBuffer(groupId, buffer);
+      }
     } catch (err) {
       if (this.explicitDisconnect) return;
 
@@ -282,7 +291,7 @@ export class SseConnectionManager {
 
     // Stream ended — if not explicit disconnect, reconnect
     const conn = this.groupConnections.get(groupId);
-    if (conn && !this.explicitDisconnect) {
+    if (conn && !this.explicitDisconnect && !conn.superseded) {
       conn.state = "disconnected";
       conn.abortController = null;
 
@@ -467,6 +476,7 @@ export class SseConnectionManager {
     this.updateAggregateState();
 
     if (data.reason === "superseded") {
+      conn.superseded = true;
       // Do NOT reconnect — another connection has taken over
       this.logger.info(
         { transport: "sse", groupId, closeReason: "superseded" },
@@ -495,6 +505,14 @@ export class SseConnectionManager {
 
     const conn = this.groupConnections.get(groupId);
     if (!conn) return;
+
+    if (conn.superseded) return;
+
+    // Clear any existing reconnect timer to prevent duplicate timers
+    if (conn.reconnectTimer !== null) {
+      clearTimeout(conn.reconnectTimer);
+      conn.reconnectTimer = null;
+    }
 
     const currentAttempt = conn.reconnectAttempt;
     const delay = getReconnectDelay(currentAttempt, this.config.agent.reconnect_delays_ms);
