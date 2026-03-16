@@ -925,104 +925,22 @@ describe("SseConnectionManager", () => {
       sender: { id: "sender-001", display_name: "Test User", verified: false },
       inserted_at: "2026-03-17T10:00:00Z",
     };
-    const json = JSON.stringify(message);
-
-    // Split the JSON across multiple data: lines
-    const part1 = json.slice(0, 40);
-    const part2 = json.slice(40, 80);
-    const part3 = json.slice(80);
-
-    // Reconstruct the JSON with newlines — the parser must join them
-    const multiLineEvent =
-      `event: new_message\n` +
-      `id: msg-multiline-001\n` +
-      `data: ${part1}\n` +
-      `data: ${part2}\n` +
-      `data: ${part3}\n` +
-      `\n`;
-
-    // The joined data will be: part1 + "\n" + part2 + "\n" + part3
-    // which is NOT valid JSON (has embedded newlines). This is expected per SSE spec.
-    // For a real multi-line test, we need the JSON to be valid after joining.
-    // Instead, send each data line as a complete JSON on a single line (standard approach),
-    // or test with a payload that is valid when joined.
-
-    // Better approach: send the full JSON on one line to validate single-line still works,
-    // and separately test that multiple data: lines are concatenated.
-    // For a realistic test: the server sends the full JSON on one data: line.
-    // Multi-line data: is uncommon for JSON but we should still handle it.
-    // Let's test with a message whose content contains a newline (valid via multi-line data:)
-
-    const multiLineMessage = {
-      id: "msg-multiline-002",
-      group_id: "550e8400-e29b-41d4-a716-446655440000",
-      content: "How do I deploy?",
-      message_type: "question",
-      parent_message_id: null,
-      sender: { id: "sender-001", display_name: "Test User", verified: false },
-      inserted_at: "2026-03-17T10:00:00Z",
-    };
-    const fullJson = JSON.stringify(multiLineMessage);
-
-    // Single data: line — control test
-    const singleLineEvent =
-      `event: new_message\n` + `id: msg-multiline-002\n` + `data: ${fullJson}\n` + `\n`;
-
-    const mockFetch = createMockFetch([singleLineEvent]);
-
-    const { manager, questions } = createSseManager({
-      fetchFn: mockFetch,
-      configOverrides: { groups: [group] },
-    });
-
-    await manager.connect();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    expect(questions).toHaveLength(1);
-    expect(questions[0].question.id).toBe("msg-multiline-002");
-
-    await manager.disconnect();
-  });
-
-  // 20. Multi-line data: lines are joined with newline separator
-  it("should join multiple data: lines and parse concatenated result", async () => {
-    vi.useRealTimers();
-
-    const group = createMockGroupConfig();
-
-    // Craft a JSON string, split it across multiple data: lines
-    // After joining with "\n", JSON.parse must succeed
-    // We'll use a trick: put the complete JSON on a single data: line but verify the
-    // accumulation logic by having TWO data: lines that together form valid JSON
-    // when joined with \n — but JSON.parse ignores whitespace including \n in most positions.
-
-    // Actually, JSON.parse handles newlines within string values and between tokens.
-    // A newline between `{` and `"id"` is valid JSON whitespace.
-    // So we split the JSON at a point between tokens:
-    const message = {
-      id: "msg-multi-001",
-      group_id: "550e8400-e29b-41d4-a716-446655440000",
-      content: "How do I deploy?",
-      message_type: "question",
-      parent_message_id: null,
-      sender: { id: "sender-001", display_name: "Test User", verified: false },
-      inserted_at: "2026-03-17T10:00:00Z",
-    };
     const fullJson = JSON.stringify(message);
 
-    // Split at a comma boundary (valid JSON split point — newline is whitespace)
+    // Split JSON at a comma boundary — newline between JSON tokens is valid whitespace
     const commaIdx = fullJson.indexOf(",");
     const line1 = fullJson.slice(0, commaIdx + 1);
     const line2 = fullJson.slice(commaIdx + 1);
 
-    const multiDataEvent =
+    // Two data: lines — parser must join them with "\n" to reconstruct valid JSON
+    const multiLineEvent =
       `event: new_message\n` +
-      `id: msg-multi-001\n` +
+      `id: msg-multiline-001\n` +
       `data: ${line1}\n` +
       `data: ${line2}\n` +
       `\n`;
 
-    const mockFetch = createMockFetch([multiDataEvent]);
+    const mockFetch = createMockFetch([multiLineEvent]);
 
     const { manager, questions } = createSseManager({
       fetchFn: mockFetch,
@@ -1032,10 +950,8 @@ describe("SseConnectionManager", () => {
     await manager.connect();
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // The two data: lines should be joined with \n, producing valid JSON
-    // (newline is valid whitespace between JSON tokens)
     expect(questions).toHaveLength(1);
-    expect(questions[0].question.id).toBe("msg-multi-001");
+    expect(questions[0].question.id).toBe("msg-multiline-001");
     expect(questions[0].question.content).toBe("How do I deploy?");
     expect(questions[0].question.sender.display_name).toBe("Test User");
 

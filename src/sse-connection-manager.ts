@@ -84,6 +84,9 @@ export class SseConnectionManager {
     try {
       const connectPromises = this.config.groups.map((group) => this.connectGroup(group.group_id));
       await Promise.all(connectPromises);
+    } catch (error) {
+      await this.disconnect(); // clean up any connections that succeeded
+      throw error;
     } finally {
       this.initialConnect = false;
     }
@@ -307,6 +310,9 @@ export class SseConnectionManager {
    * Lines starting with `:` are comments (e.g., `: ping`).
    */
   private processBuffer(groupId: string, buffer: string): string {
+    // Normalize CRLF/CR to LF per W3C SSE spec (valid line endings: CR, LF, CRLF)
+    buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
     // Split on double newlines (event boundary)
     const parts = buffer.split("\n\n");
 
