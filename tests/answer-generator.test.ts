@@ -39,6 +39,7 @@ function createMockConfig(overrides?: Partial<Config["llm"]>): Config {
       server_url: "https://api.meshimize.com",
       api_key: "test-api-key",
       ws_path: "/socket/websocket",
+      transport: "websocket",
     },
     llm: {
       provider: "openai",
@@ -70,6 +71,7 @@ function createMockConfig(overrides?: Partial<Config["llm"]>): Config {
       health_summary_interval_s: 300,
       shutdown_timeout_ms: 10000,
       log_level: "info",
+      sse_keepalive_timeout_ms: 90000,
     },
     groups: [],
   };
