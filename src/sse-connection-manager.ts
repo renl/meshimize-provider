@@ -61,6 +61,12 @@ export class SseConnectionManager {
   async connect(): Promise<void> {
     this.explicitDisconnect = false;
 
+    // Re-entrancy guard: clean up any existing connections before reconnecting
+    if (this.groupConnections.size > 0) {
+      await this.disconnect();
+      this.explicitDisconnect = false; // disconnect() sets this to true, reset it
+    }
+
     const groupCount = this.config.groups.length;
     this.logger.info(
       { transport: "sse", groupCount },
@@ -146,6 +152,7 @@ export class SseConnectionManager {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.config.meshimize.api_key}`,
       Accept: "text/event-stream",
+      "Cache-Control": "no-cache",
     };
 
     if (conn.lastEventId) {
@@ -386,7 +393,12 @@ export class SseConnectionManager {
       message = JSON.parse(rawData) as IncomingMessage;
     } catch {
       this.logger.warn(
-        { transport: "sse", groupId, rawData },
+        {
+          transport: "sse",
+          groupId,
+          rawDataLength: rawData.length,
+          rawDataPreview: rawData.slice(0, 200),
+        },
         "Failed to parse SSE new_message event data",
       );
       return;
@@ -446,7 +458,12 @@ export class SseConnectionManager {
       data = JSON.parse(rawData) as { reason: string };
     } catch {
       this.logger.warn(
-        { transport: "sse", groupId, rawData },
+        {
+          transport: "sse",
+          groupId,
+          rawDataLength: rawData.length,
+          rawDataPreview: rawData.slice(0, 200),
+        },
         "Failed to parse SSE close event data",
       );
       return;
