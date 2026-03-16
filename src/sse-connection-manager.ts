@@ -492,7 +492,9 @@ export class SseConnectionManager {
         "Server shutdown — reconnecting immediately",
       );
       conn.reconnectAttempt = 0;
-      this.connectGroup(groupId);
+      void this.connectGroup(groupId).catch(() => {
+        this.scheduleReconnect(groupId);
+      });
       return;
     }
 
@@ -533,7 +535,7 @@ export class SseConnectionManager {
     conn.reconnectTimer = setTimeout(() => {
       conn.reconnectTimer = null;
       if (!this.explicitDisconnect) {
-        this.connectGroup(groupId);
+        void this.connectGroup(groupId).catch(() => {});
       }
     }, delay);
   }
