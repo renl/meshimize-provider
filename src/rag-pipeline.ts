@@ -549,7 +549,10 @@ export class RagPipeline {
         return true;
       }
 
-      const ingestedAt = new Date(collection.metadata.ingested_at as string);
+      // Safe: hasInvalidMetadata is false here, which guarantees collection.metadata
+      // and ingested_at are present and parseable (checked above).
+      const metadata = collection.metadata!;
+      const ingestedAt = new Date(metadata.ingested_at as string);
 
       // Fingerprint check — authoritative when available.
       // If the stored fingerprint matches the current source files, the corpus is
@@ -557,7 +560,7 @@ export class RagPipeline {
       // re-ingestion when docs haven't changed but the stale window has elapsed.
       // Guard: only compare when docs_path exists and contains files. A missing/
       // unmounted docs_path must NOT trigger re-ingestion (data-loss prevention).
-      if (collection.metadata?.source_fingerprint) {
+      if (metadata.source_fingerprint) {
         const currentFingerprint = computeSourceFingerprint(group.docs_path);
         if (currentFingerprint === null) {
           // docs_path missing, empty, or unreadable — refuse to re-ingest to protect
@@ -569,7 +572,7 @@ export class RagPipeline {
             "docs_path missing or empty — skipping re-ingestion to protect existing data",
           );
           return false;
-        } else if (currentFingerprint === collection.metadata.source_fingerprint) {
+        } else if (currentFingerprint === metadata.source_fingerprint) {
           // Fingerprint matches — corpus is current, no re-ingestion needed
           return false;
         } else {
