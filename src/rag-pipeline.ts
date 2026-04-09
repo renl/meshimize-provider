@@ -388,7 +388,12 @@ export class RagPipeline {
       };
     }
 
-    // Compute fingerprint after confirming docs exist (avoids unnecessary filesystem walk)
+    // Compute fingerprint from raw file bytes via computeSourceFingerprint().
+    // This re-walks the docs directory after loadDocuments() already did so. We
+    // intentionally keep the same raw-byte hashing algorithm used in needsIngestion()
+    // so the stored fingerprint matches what needsIngestion() computes on the next
+    // restart — using post-processed content here would cause a mismatch for
+    // .html.markerb files (ERB stripped) and trigger unnecessary re-ingestion.
     const sourceFingerprint = computeSourceFingerprint(group.docs_path);
 
     // Chunk documents
@@ -534,13 +539,15 @@ export class RagPipeline {
       if (collection.metadata?.source_fingerprint) {
         const currentFingerprint = computeSourceFingerprint(group.docs_path);
         if (currentFingerprint === null) {
-          // docs_path missing, empty, or unreadable — skip fingerprint comparison
-          // to prevent data loss from transient filesystem issues.
-          // Fall through to staleness check.
+          // docs_path missing, empty, or unreadable — refuse to re-ingest to protect
+          // existing data. Returning false prevents the staleness fallback from
+          // triggering ingest(), which would delete the collection and leave the
+          // group with no data.
           this.options.logger.warn(
             { groupId: group.group_id, groupName: group.group_name },
-            "docs_path missing or empty — skipping fingerprint-based re-ingestion to protect existing data",
+            "docs_path missing or empty — skipping re-ingestion to protect existing data",
           );
+          return false;
         } else if (currentFingerprint === collection.metadata.source_fingerprint) {
           // Fingerprint matches — corpus is current, no re-ingestion needed
           return false;
@@ -554,7 +561,7 @@ export class RagPipeline {
         }
       }
 
-      // Staleness fallback (no stored fingerprint, or docs_path was unreadable).
+      // Staleness fallback (no stored fingerprint in collection metadata).
       // Use ingested_at age as a best-effort freshness signal.
       const staleDays = this.options.staleDays;
       const now = new Date();
