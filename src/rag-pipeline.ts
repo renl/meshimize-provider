@@ -434,14 +434,21 @@ export class RagPipeline {
       embeddingsInstance.embedQuery.bind(embeddingsInstance),
     );
 
+    const collectionMetadata: Record<string, string> = {
+      ingested_at: new Date().toISOString(),
+      group_id: group.group_id,
+      "hnsw:space": this.options.distanceMetric,
+    };
+    // Only store source_fingerprint when it was successfully computed.
+    // ChromaDB metadata values must be scalar (string/number/boolean) — null
+    // is invalid and would make the presence check in needsIngestion() ambiguous.
+    if (sourceFingerprint !== null) {
+      collectionMetadata.source_fingerprint = sourceFingerprint;
+    }
+
     const collection = await this.client.getOrCreateCollection({
       name: collectionName,
-      metadata: {
-        ingested_at: new Date().toISOString(),
-        group_id: group.group_id,
-        source_fingerprint: sourceFingerprint,
-        "hnsw:space": this.options.distanceMetric,
-      },
+      metadata: collectionMetadata,
       embeddingFunction,
     });
 
@@ -562,11 +569,21 @@ export class RagPipeline {
       }
 
       // Staleness fallback (no stored fingerprint in collection metadata).
-      // Use ingested_at age as a best-effort freshness signal.
+      // Use ingested_at age as a best-effort freshness signal, but only when
+      // source documents are actually available. Missing/empty/unreadable docs
+      // must not trigger re-ingestion because ingest() deletes the collection.
       const staleDays = this.options.staleDays;
       const now = new Date();
       const diffDays = (now.getTime() - ingestedAt.getTime()) / (1000 * 60 * 60 * 24);
       if (diffDays >= staleDays) {
+        const currentFingerprint = computeSourceFingerprint(group.docs_path);
+        if (currentFingerprint === null) {
+          this.options.logger.warn(
+            { groupId: group.group_id, groupName: group.group_name },
+            "docs_path missing or empty — skipping staleness-based re-ingestion to protect existing data",
+          );
+          return false;
+        }
         return true;
       }
 

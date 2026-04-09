@@ -622,6 +622,55 @@ describe("rag-pipeline", () => {
     expect(needs).toBe(false);
   });
 
+  it("should return false from needsIngestion when docs_path is missing during staleness fallback (legacy collection, no fingerprint)", async () => {
+    // Legacy collection without source_fingerprint — only has ingested_at.
+    // If ingested_at is past staleDays but docs_path is missing/empty,
+    // the staleness fallback must NOT trigger re-ingestion (data-loss prevention).
+    const missingPath = join(tempDir, "nonexistent-docs-volume");
+
+    // Set ingested_at to 30 days ago — well past the default 7-day stale window
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 30);
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: oldDate.toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      // source_fingerprint intentionally omitted — legacy collection
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(missingPath);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return false from needsIngestion when docs_path is empty during staleness fallback (legacy collection, no fingerprint)", async () => {
+    // Legacy collection without source_fingerprint.
+    // Stale window exceeded but docs directory is empty — must protect existing data.
+    const emptyDocsDir = join(tempDir, "empty-docs");
+    mkdirSync(emptyDocsDir, { recursive: true });
+
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 30);
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: oldDate.toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      // source_fingerprint intentionally omitted — legacy collection
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(emptyDocsDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
   // ─── Empty directory ───
 
   it("should produce zero chunks for empty directory", async () => {
