@@ -118,8 +118,10 @@ function walkDirectory(dir: string, basePath: string): LoadedDocument[] {
  * Recursively collect file entries as "relative_path:content_hash" strings.
  * Uses SHA-256 of file content (not mtime) so the fingerprint is stable across
  * deploys, volume remounts, and file copies that preserve content but change mtime.
- * Returns false when a transient filesystem error prevents full traversal, so
- * callers can treat the result as unreliable and skip fingerprint-based decisions.
+ * Returns false when a non-ENOENT filesystem error (e.g., EACCES on a partially
+ * mounted volume) prevents full traversal, so callers can treat the result as
+ * unreliable and skip fingerprint-based decisions. Missing directories (ENOENT)
+ * are treated as a successful no-op and return true.
  */
 function collectFileEntries(dir: string, basePath: string, entries: string[]): boolean {
   if (!existsSync(dir)) return true;
