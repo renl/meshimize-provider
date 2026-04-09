@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import pino from "pino";
