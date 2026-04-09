@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
+import { createHash } from "node:crypto";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { ChromaClient, type IEmbeddingFunction } from "chromadb";
 import type pino from "pino";
@@ -111,6 +112,36 @@ function walkDirectory(dir: string, basePath: string): LoadedDocument[] {
   }
 
   return docs;
+}
+
+/**
+ * Recursively collect file entries as "relative_path:size" strings.
+ */
+function collectFileEntries(dir: string, basePath: string, entries: string[]): void {
+  if (!existsSync(dir)) return;
+  const dirEntries = readdirSync(dir);
+  for (const entry of dirEntries) {
+    const fullPath = join(dir, entry);
+    const stat = statSync(fullPath);
+    if (stat.isDirectory()) {
+      if (SKIP_DIRS.has(entry)) continue;
+      collectFileEntries(fullPath, basePath, entries);
+    } else if (stat.isFile() && isIncludedFile(entry)) {
+      const relPath = relative(basePath, fullPath);
+      entries.push(`${relPath}:${stat.size}`);
+    }
+  }
+}
+
+/**
+ * Compute a deterministic fingerprint of source files for change detection.
+ * Uses sorted (relative_path, file_size) tuples hashed with SHA-256.
+ */
+function computeSourceFingerprint(docsPath: string): string {
+  const entries: string[] = [];
+  collectFileEntries(docsPath, docsPath, entries);
+  entries.sort();
+  return createHash("sha256").update(entries.join("\n")).digest("hex");
 }
 
 /**
@@ -259,6 +290,7 @@ export class RagPipeline {
   async ingest(group: GroupConfig): Promise<IngestResult> {
     const startTime = Date.now();
     const collectionName = this.getCollectionName(group);
+    const sourceFingerprint = computeSourceFingerprint(group.docs_path);
     this.options.logger.info(
       { groupId: group.group_id, collection: collectionName },
       "Starting ingestion",
@@ -343,6 +375,7 @@ export class RagPipeline {
       metadata: {
         ingested_at: new Date().toISOString(),
         group_id: group.group_id,
+        source_fingerprint: sourceFingerprint,
         "hnsw:space": this.options.distanceMetric,
       },
       embeddingFunction,
@@ -431,6 +464,18 @@ export class RagPipeline {
       // Validate group_id matches (missing group_id also triggers re-ingestion)
       if (!collection.metadata?.group_id || collection.metadata.group_id !== group.group_id) {
         return true;
+      }
+
+      // Check if source files have changed since last ingestion
+      if (collection.metadata?.source_fingerprint) {
+        const currentFingerprint = computeSourceFingerprint(group.docs_path);
+        if (currentFingerprint !== collection.metadata.source_fingerprint) {
+          this.options.logger.info(
+            { groupId: group.group_id, groupName: group.group_name },
+            "Source files changed — re-ingestion needed",
+          );
+          return true;
+        }
       }
 
       return false;
