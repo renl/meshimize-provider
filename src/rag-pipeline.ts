@@ -494,7 +494,10 @@ export class RagPipeline {
    *
    * Decision order:
    * 1. Missing collection or empty → needs ingestion
-   * 2. Missing/invalid ingested_at or group_id mismatch → needs ingestion
+   * 2. Missing/invalid ingested_at or group_id mismatch → needs ingestion,
+   *    BUT only when source docs are actually available. If docs_path is
+   *    missing/empty/unreadable, returning true would cause ingest() to
+   *    delete the existing collection and leave the group with no data.
    * 3. Source fingerprint (if stored): matching fingerprint means corpus is current
    *    even if ingested_at is past the staleness window — fingerprint is authoritative
    *    because it proves the source files have not changed.
@@ -525,19 +528,28 @@ export class RagPipeline {
         return true;
       }
 
-      // Require valid ingested_at metadata
-      if (!collection.metadata?.ingested_at) {
-        return true;
-      }
-      const ingestedAt = new Date(collection.metadata.ingested_at as string);
-      if (isNaN(ingestedAt.getTime())) {
+      // Require valid ingested_at metadata.
+      // Guard: if metadata is invalid but docs are unavailable, returning true
+      // would cause ingest() to delete the existing collection (data loss).
+      const hasInvalidMetadata =
+        !collection.metadata?.ingested_at ||
+        isNaN(new Date(collection.metadata.ingested_at as string).getTime()) ||
+        !collection.metadata?.group_id ||
+        collection.metadata.group_id !== group.group_id;
+
+      if (hasInvalidMetadata) {
+        const currentFingerprint = computeSourceFingerprint(group.docs_path);
+        if (currentFingerprint === null) {
+          this.options.logger.warn(
+            { groupId: group.group_id, groupName: group.group_name },
+            "Invalid collection metadata but docs_path missing or empty — skipping re-ingestion to protect existing data",
+          );
+          return false;
+        }
         return true;
       }
 
-      // Validate group_id matches (missing group_id also triggers re-ingestion)
-      if (!collection.metadata?.group_id || collection.metadata.group_id !== group.group_id) {
-        return true;
-      }
+      const ingestedAt = new Date(collection.metadata.ingested_at as string);
 
       // Fingerprint check — authoritative when available.
       // If the stored fingerprint matches the current source files, the corpus is

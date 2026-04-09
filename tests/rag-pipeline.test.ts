@@ -392,6 +392,10 @@ describe("rag-pipeline", () => {
   });
 
   it("should return true when ingested_at is an invalid date string", async () => {
+    // Provide docs so the metadata-validation re-ingestion path is exercised.
+    // Without docs, the guard returns false to protect existing data.
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
     mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
     mockCount.mockResolvedValue(100);
     mockCollection.metadata = {
@@ -455,6 +459,9 @@ describe("rag-pipeline", () => {
   // ─── group_id mismatch ───
 
   it("should return true from needsIngestion when group_id mismatches", async () => {
+    // Provide docs so the metadata-validation re-ingestion path is exercised.
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
     mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
     mockCount.mockResolvedValue(100);
     mockCollection.metadata = {
@@ -470,6 +477,9 @@ describe("rag-pipeline", () => {
   });
 
   it("should return true from needsIngestion when group_id is missing from metadata", async () => {
+    // Provide docs so the metadata-validation re-ingestion path is exercised.
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
     mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
     mockCount.mockResolvedValue(100);
     mockCollection.metadata = {
@@ -666,6 +676,63 @@ describe("rag-pipeline", () => {
 
     const pipeline = new RagPipeline(createTestOptions());
     const group = createTestGroup(emptyDocsDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return false from needsIngestion when ingested_at is missing and docs_path unavailable (protects existing data)", async () => {
+    // Collection has chunks but invalid metadata (no ingested_at).
+    // If docs_path is missing, returning true would cause ingest() to delete
+    // the existing collection — data-loss prevention must kick in.
+    const missingPath = join(tempDir, "nonexistent-docs-volume");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      // ingested_at intentionally omitted — invalid metadata
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(missingPath);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return true from needsIngestion when ingested_at is missing but docs are available", async () => {
+    // Invalid metadata but docs are present — safe to re-ingest.
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      // ingested_at intentionally omitted
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(true);
+  });
+
+  it("should return false from needsIngestion when group_id mismatches and docs_path unavailable (protects existing data)", async () => {
+    // Collection has chunks but group_id doesn't match.
+    // If docs_path is missing, returning true would wipe the existing collection.
+    const missingPath = join(tempDir, "nonexistent-docs-volume");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "old-group-id-that-does-not-match",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(missingPath);
 
     const needs = await pipeline.needsIngestion(group);
     expect(needs).toBe(false);
