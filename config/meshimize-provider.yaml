@@ -20,7 +20,7 @@ embedding:
   api_key: "YOUR_OPENAI_API_KEY" # Override: EMBEDDING_API_KEY
   # base_url: "https://api.openai.com/v1"  # Override: EMBEDDING_BASE_URL (optional — for OpenAI-compatible providers)
   dimensions: 1024
-  batch_size: 10 # Override: EMBEDDING_BATCH_SIZE
+  batch_size: 100 # Override: EMBEDDING_BATCH_SIZE
   requests_per_minute: 3000
 
 vector_store:

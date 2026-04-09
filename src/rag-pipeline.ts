@@ -138,10 +138,14 @@ function collectFileEntries(dir: string, basePath: string, entries: string[]): v
  * Compute a deterministic fingerprint of source files for change detection.
  * Uses sorted (relative_path, file_size, mtime_ms) tuples hashed with SHA-256.
  * Including mtime ensures content-only changes (same byte count) are detected.
+ * Returns null when the directory does not exist or contains no matching files,
+ * so callers can distinguish "no files" from "files present with hash X".
  */
-function computeSourceFingerprint(docsPath: string): string {
+function computeSourceFingerprint(docsPath: string): string | null {
+  if (!existsSync(docsPath)) return null;
   const entries: string[] = [];
   collectFileEntries(docsPath, docsPath, entries);
+  if (entries.length === 0) return null;
   entries.sort();
   return createHash("sha256").update(entries.join("\n")).digest("hex");
 }
@@ -292,7 +296,6 @@ export class RagPipeline {
   async ingest(group: GroupConfig): Promise<IngestResult> {
     const startTime = Date.now();
     const collectionName = this.getCollectionName(group);
-    const sourceFingerprint = computeSourceFingerprint(group.docs_path);
     this.options.logger.info(
       { groupId: group.group_id, collection: collectionName },
       "Starting ingestion",
@@ -333,6 +336,9 @@ export class RagPipeline {
         durationMs: Date.now() - startTime,
       };
     }
+
+    // Compute fingerprint after confirming docs exist (avoids unnecessary filesystem walk)
+    const sourceFingerprint = computeSourceFingerprint(group.docs_path);
 
     // Chunk documents
     const splitter = this.createSplitter(group);
@@ -468,10 +474,21 @@ export class RagPipeline {
         return true;
       }
 
-      // Check if source files have changed since last ingestion
+      // Check if source files have changed since last ingestion.
+      // Guard: only compare fingerprints when docs_path exists and contains files.
+      // A missing/unmounted docs_path or empty directory must NOT trigger fingerprint-based
+      // re-ingestion, because ingest() would delete the existing collection and leave the
+      // group with no data.
       if (collection.metadata?.source_fingerprint) {
         const currentFingerprint = computeSourceFingerprint(group.docs_path);
-        if (currentFingerprint !== collection.metadata.source_fingerprint) {
+        if (currentFingerprint === null) {
+          // docs_path missing or contains no matching files — skip fingerprint comparison
+          // to prevent data loss from transient filesystem issues
+          this.options.logger.warn(
+            { groupId: group.group_id, groupName: group.group_name },
+            "docs_path missing or empty — skipping fingerprint-based re-ingestion to protect existing data",
+          );
+        } else if (currentFingerprint !== collection.metadata.source_fingerprint) {
           this.options.logger.info(
             { groupId: group.group_id, groupName: group.group_name },
             "Source files changed — re-ingestion needed",

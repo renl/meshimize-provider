@@ -549,6 +549,47 @@ describe("rag-pipeline", () => {
     expect(needs).toBe(false);
   });
 
+  it("should return false from needsIngestion when docs_path is missing (protects existing data)", async () => {
+    // Simulate a missing/unmounted docs volume: docs_path does not exist
+    const missingPath = join(tempDir, "nonexistent-docs-volume");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: "previously-valid-fingerprint",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(missingPath);
+
+    // Should NOT trigger re-ingestion — missing docs_path skips fingerprint comparison
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return false from needsIngestion when docs_path is empty directory (protects existing data)", async () => {
+    // docs_path exists but contains no matching files (e.g., volume mounted but empty)
+    const emptyDocsDir = join(tempDir, "empty-docs");
+    mkdirSync(emptyDocsDir, { recursive: true });
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: "previously-valid-fingerprint",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(emptyDocsDir);
+
+    // Should NOT trigger re-ingestion — empty docs_path skips fingerprint comparison
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
   // ─── Empty directory ───
 
   it("should produce zero chunks for empty directory", async () => {
