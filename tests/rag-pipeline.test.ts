@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import pino from "pino";
 import type { GroupConfig } from "../src/config.js";
 
@@ -391,6 +392,10 @@ describe("rag-pipeline", () => {
   });
 
   it("should return true when ingested_at is an invalid date string", async () => {
+    // Provide docs so the metadata-validation re-ingestion path is exercised.
+    // Without docs, the guard returns false to protect existing data.
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
     mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
     mockCount.mockResolvedValue(100);
     mockCollection.metadata = {
@@ -454,6 +459,9 @@ describe("rag-pipeline", () => {
   // ─── group_id mismatch ───
 
   it("should return true from needsIngestion when group_id mismatches", async () => {
+    // Provide docs so the metadata-validation re-ingestion path is exercised.
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
     mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
     mockCount.mockResolvedValue(100);
     mockCollection.metadata = {
@@ -469,6 +477,9 @@ describe("rag-pipeline", () => {
   });
 
   it("should return true from needsIngestion when group_id is missing from metadata", async () => {
+    // Provide docs so the metadata-validation re-ingestion path is exercised.
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
     mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
     mockCount.mockResolvedValue(100);
     mockCollection.metadata = {
@@ -481,6 +492,250 @@ describe("rag-pipeline", () => {
 
     const needs = await pipeline.needsIngestion(group);
     expect(needs).toBe(true);
+  });
+
+  // ─── source_fingerprint ───
+
+  it("should return false from needsIngestion when source_fingerprint matches current docs", async () => {
+    // Create docs in tempDir so the fingerprint is deterministic
+    const docContent = "# Test doc\nContent here.";
+    writeFileSync(join(tempDir, "doc.md"), docContent);
+
+    // Compute the expected fingerprint (mirrors computeSourceFingerprint logic)
+    // Uses content hash (SHA-256 of file bytes) rather than mtime for deploy stability
+    const fileHash = createHash("sha256").update(Buffer.from(docContent)).digest("hex");
+    const entries = [`doc.md:${fileHash}`];
+    entries.sort();
+    const expectedFingerprint = createHash("sha256").update(entries.join("\n")).digest("hex");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: expectedFingerprint,
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return true from needsIngestion when source_fingerprint differs from current docs", async () => {
+    // Create docs in tempDir
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: "stale-fingerprint-that-does-not-match",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(true);
+  });
+
+  it("should return false from needsIngestion when fingerprint matches even if past stale window", async () => {
+    // Fingerprint match is authoritative — even if ingested_at is past staleDays,
+    // if the source files haven't changed, re-ingestion is unnecessary.
+    const docContent = "# Test doc\nContent here.";
+    writeFileSync(join(tempDir, "doc.md"), docContent);
+
+    const fileHash = createHash("sha256").update(Buffer.from(docContent)).digest("hex");
+    const entries = [`doc.md:${fileHash}`];
+    entries.sort();
+    const expectedFingerprint = createHash("sha256").update(entries.join("\n")).digest("hex");
+
+    // Set ingested_at to 30 days ago (well past the default 7-day stale window)
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 30);
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: oldDate.toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: expectedFingerprint,
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should skip fingerprint check when source_fingerprint is absent from metadata (backward compat)", async () => {
+    // Pre-existing collection without source_fingerprint should not trigger re-ingestion
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      // source_fingerprint intentionally omitted — pre-existing collection
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return false from needsIngestion when docs_path is missing (protects existing data)", async () => {
+    // Simulate a missing/unmounted docs volume: docs_path does not exist
+    const missingPath = join(tempDir, "nonexistent-docs-volume");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: "previously-valid-fingerprint",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(missingPath);
+
+    // Should NOT trigger re-ingestion — missing docs_path skips fingerprint comparison
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return false from needsIngestion when docs_path is empty directory (protects existing data)", async () => {
+    // docs_path exists but contains no matching files (e.g., volume mounted but empty)
+    const emptyDocsDir = join(tempDir, "empty-docs");
+    mkdirSync(emptyDocsDir, { recursive: true });
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: "previously-valid-fingerprint",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(emptyDocsDir);
+
+    // Should NOT trigger re-ingestion — empty docs_path skips fingerprint comparison
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return false from needsIngestion when docs_path is missing during staleness fallback (legacy collection, no fingerprint)", async () => {
+    // Legacy collection without source_fingerprint — only has ingested_at.
+    // If ingested_at is past staleDays but docs_path is missing/empty,
+    // the staleness fallback must NOT trigger re-ingestion (data-loss prevention).
+    const missingPath = join(tempDir, "nonexistent-docs-volume");
+
+    // Set ingested_at to 30 days ago — well past the default 7-day stale window
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 30);
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: oldDate.toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      // source_fingerprint intentionally omitted — legacy collection
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(missingPath);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return false from needsIngestion when docs_path is empty during staleness fallback (legacy collection, no fingerprint)", async () => {
+    // Legacy collection without source_fingerprint.
+    // Stale window exceeded but docs directory is empty — must protect existing data.
+    const emptyDocsDir = join(tempDir, "empty-docs");
+    mkdirSync(emptyDocsDir, { recursive: true });
+
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 30);
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: oldDate.toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      // source_fingerprint intentionally omitted — legacy collection
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(emptyDocsDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return false from needsIngestion when ingested_at is missing and docs_path unavailable (protects existing data)", async () => {
+    // Collection has chunks but invalid metadata (no ingested_at).
+    // If docs_path is missing, returning true would cause ingest() to delete
+    // the existing collection — data-loss prevention must kick in.
+    const missingPath = join(tempDir, "nonexistent-docs-volume");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      // ingested_at intentionally omitted — invalid metadata
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(missingPath);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return true from needsIngestion when ingested_at is missing but docs are available", async () => {
+    // Invalid metadata but docs are present — safe to re-ingest.
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      // ingested_at intentionally omitted
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(true);
+  });
+
+  it("should return false from needsIngestion when group_id mismatches and docs_path unavailable (protects existing data)", async () => {
+    // Collection has chunks but group_id doesn't match.
+    // If docs_path is missing, returning true would wipe the existing collection.
+    const missingPath = join(tempDir, "nonexistent-docs-volume");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "old-group-id-that-does-not-match",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(missingPath);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
   });
 
   // ─── Empty directory ───

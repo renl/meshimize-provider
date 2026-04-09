@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
+import { createHash } from "node:crypto";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { ChromaClient, type IEmbeddingFunction } from "chromadb";
 import type pino from "pino";
@@ -111,6 +112,95 @@ function walkDirectory(dir: string, basePath: string): LoadedDocument[] {
   }
 
   return docs;
+}
+
+/**
+ * Recursively collect file entries as "relative_path:content_hash" strings.
+ * Uses SHA-256 of file content (not mtime) so the fingerprint is stable across
+ * deploys, volume remounts, and file copies that preserve content but change mtime.
+ * Returns false when a non-ENOENT filesystem error (e.g., EACCES on a partially
+ * mounted volume) prevents full traversal, so callers can treat the result as
+ * unreliable and skip fingerprint-based decisions. Missing directories (ENOENT)
+ * are treated as a successful no-op and return true.
+ */
+function collectFileEntries(dir: string, basePath: string, entries: string[]): boolean {
+  if (!existsSync(dir)) return true;
+
+  let dirEntries: string[];
+  try {
+    dirEntries = readdirSync(dir);
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "ENOENT"
+    ) {
+      return true; // directory vanished between existsSync and readdirSync
+    }
+    return false; // unrecoverable — signal caller to skip fingerprint
+  }
+
+  for (const entry of dirEntries) {
+    const fullPath = join(dir, entry);
+
+    let stat;
+    try {
+      stat = statSync(fullPath);
+    } catch (error: unknown) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code: string }).code === "ENOENT"
+      ) {
+        continue; // file vanished between readdir and stat — skip it
+      }
+      return false; // unrecoverable — signal caller to skip fingerprint
+    }
+
+    if (stat.isDirectory()) {
+      if (SKIP_DIRS.has(entry)) continue;
+      if (!collectFileEntries(fullPath, basePath, entries)) return false;
+    } else if (stat.isFile() && isIncludedFile(entry)) {
+      const relPath = relative(basePath, fullPath);
+      let fileHash: string;
+      try {
+        const content = readFileSync(fullPath);
+        fileHash = createHash("sha256").update(content).digest("hex");
+      } catch (error: unknown) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          (error as { code: string }).code === "ENOENT"
+        ) {
+          continue;
+        }
+        return false;
+      }
+      entries.push(`${relPath}:${fileHash}`);
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Compute a deterministic fingerprint of source files for change detection.
+ * Uses sorted (relative_path, content_hash) tuples hashed with SHA-256.
+ * Content hashing (rather than mtime) ensures the fingerprint is stable across
+ * deploys/copies that don't change file contents.
+ * Returns null when the directory does not exist, contains no matching files,
+ * or cannot be fully traversed due to a filesystem error.
+ */
+function computeSourceFingerprint(docsPath: string): string | null {
+  if (!existsSync(docsPath)) return null;
+  const entries: string[] = [];
+  if (!collectFileEntries(docsPath, docsPath, entries)) return null;
+  if (entries.length === 0) return null;
+  entries.sort();
+  return createHash("sha256").update(entries.join("\n")).digest("hex");
 }
 
 /**
@@ -300,6 +390,14 @@ export class RagPipeline {
       };
     }
 
+    // Compute fingerprint from raw file bytes via computeSourceFingerprint().
+    // This re-walks the docs directory after loadDocuments() already did so. We
+    // intentionally keep the same raw-byte hashing algorithm used in needsIngestion()
+    // so the stored fingerprint matches what needsIngestion() computes on the next
+    // restart — using post-processed content here would cause a mismatch for
+    // .html.markerb files (ERB stripped) and trigger unnecessary re-ingestion.
+    const sourceFingerprint = computeSourceFingerprint(group.docs_path);
+
     // Chunk documents
     const splitter = this.createSplitter(group);
     const allChunks: { text: string; source: string }[] = [];
@@ -338,13 +436,21 @@ export class RagPipeline {
       embeddingsInstance.embedQuery.bind(embeddingsInstance),
     );
 
+    const collectionMetadata: Record<string, string> = {
+      ingested_at: new Date().toISOString(),
+      group_id: group.group_id,
+      "hnsw:space": this.options.distanceMetric,
+    };
+    // Only store source_fingerprint when it was successfully computed.
+    // ChromaDB metadata values must be scalar (string/number/boolean) — null
+    // is invalid and would make the presence check in needsIngestion() ambiguous.
+    if (sourceFingerprint !== null) {
+      collectionMetadata.source_fingerprint = sourceFingerprint;
+    }
+
     const collection = await this.client.getOrCreateCollection({
       name: collectionName,
-      metadata: {
-        ingested_at: new Date().toISOString(),
-        group_id: group.group_id,
-        "hnsw:space": this.options.distanceMetric,
-      },
+      metadata: collectionMetadata,
       embeddingFunction,
     });
 
@@ -385,6 +491,17 @@ export class RagPipeline {
   /**
    * Check if corpus exists and is fresh enough (< staleDays old).
    * Returns true if re-ingestion is needed.
+   *
+   * Decision order:
+   * 1. Missing collection or empty → needs ingestion
+   * 2. Missing/invalid ingested_at or group_id mismatch → needs ingestion,
+   *    BUT only when source docs are actually available. If docs_path is
+   *    missing/empty/unreadable, returning true would cause ingest() to
+   *    delete the existing collection and leave the group with no data.
+   * 3. Source fingerprint (if stored): matching fingerprint means corpus is current
+   *    even if ingested_at is past the staleness window — fingerprint is authoritative
+   *    because it proves the source files have not changed.
+   * 4. Staleness fallback (no fingerprint stored): rely on ingested_at age.
    */
   async needsIngestion(group: GroupConfig): Promise<boolean> {
     const collectionName = this.getCollectionName(group);
@@ -411,25 +528,79 @@ export class RagPipeline {
         return true;
       }
 
-      // Check staleness via collection metadata
-      if (collection.metadata?.ingested_at) {
-        const ingestedAt = new Date(collection.metadata.ingested_at as string);
-        if (isNaN(ingestedAt.getTime())) {
-          return true;
+      // Require valid ingested_at metadata.
+      // Guard: if metadata is invalid but docs are unavailable, returning true
+      // would cause ingest() to delete the existing collection (data loss).
+      const hasInvalidMetadata =
+        !collection.metadata?.ingested_at ||
+        isNaN(new Date(collection.metadata.ingested_at as string).getTime()) ||
+        !collection.metadata?.group_id ||
+        collection.metadata.group_id !== group.group_id;
+
+      if (hasInvalidMetadata) {
+        const currentFingerprint = computeSourceFingerprint(group.docs_path);
+        if (currentFingerprint === null) {
+          this.options.logger.warn(
+            { groupId: group.group_id, groupName: group.group_name },
+            "Invalid collection metadata but docs_path missing or empty — skipping re-ingestion to protect existing data",
+          );
+          return false;
         }
-        const staleDays = this.options.staleDays;
-        const now = new Date();
-        const diffDays = (now.getTime() - ingestedAt.getTime()) / (1000 * 60 * 60 * 24);
-        if (diffDays >= staleDays) {
-          return true;
-        }
-      } else {
-        // No ingested_at metadata — needs ingestion
         return true;
       }
 
-      // Validate group_id matches (missing group_id also triggers re-ingestion)
-      if (!collection.metadata?.group_id || collection.metadata.group_id !== group.group_id) {
+      // Safe: hasInvalidMetadata is false here, which guarantees collection.metadata
+      // and ingested_at are present and parseable (checked above).
+      const metadata = collection.metadata!;
+      const ingestedAt = new Date(metadata.ingested_at as string);
+
+      // Fingerprint check — authoritative when available.
+      // If the stored fingerprint matches the current source files, the corpus is
+      // up-to-date regardless of how old ingested_at is. This prevents unnecessary
+      // re-ingestion when docs haven't changed but the stale window has elapsed.
+      // Guard: only compare when docs_path exists and contains files. A missing/
+      // unmounted docs_path must NOT trigger re-ingestion (data-loss prevention).
+      if (metadata.source_fingerprint) {
+        const currentFingerprint = computeSourceFingerprint(group.docs_path);
+        if (currentFingerprint === null) {
+          // docs_path missing, empty, or unreadable — refuse to re-ingest to protect
+          // existing data. Returning false prevents the staleness fallback from
+          // triggering ingest(), which would delete the collection and leave the
+          // group with no data.
+          this.options.logger.warn(
+            { groupId: group.group_id, groupName: group.group_name },
+            "docs_path missing or empty — skipping re-ingestion to protect existing data",
+          );
+          return false;
+        } else if (currentFingerprint === metadata.source_fingerprint) {
+          // Fingerprint matches — corpus is current, no re-ingestion needed
+          return false;
+        } else {
+          // Fingerprint differs — source files changed
+          this.options.logger.info(
+            { groupId: group.group_id, groupName: group.group_name },
+            "Source files changed — re-ingestion needed",
+          );
+          return true;
+        }
+      }
+
+      // Staleness fallback (no stored fingerprint in collection metadata).
+      // Use ingested_at age as a best-effort freshness signal, but only when
+      // source documents are actually available. Missing/empty/unreadable docs
+      // must not trigger re-ingestion because ingest() deletes the collection.
+      const staleDays = this.options.staleDays;
+      const now = new Date();
+      const diffDays = (now.getTime() - ingestedAt.getTime()) / (1000 * 60 * 60 * 24);
+      if (diffDays >= staleDays) {
+        const currentFingerprint = computeSourceFingerprint(group.docs_path);
+        if (currentFingerprint === null) {
+          this.options.logger.warn(
+            { groupId: group.group_id, groupName: group.group_name },
+            "docs_path missing or empty — skipping staleness-based re-ingestion to protect existing data",
+          );
+          return false;
+        }
         return true;
       }
 

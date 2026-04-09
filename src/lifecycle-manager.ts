@@ -120,17 +120,23 @@ export class LifecycleManager {
       logger: this.logger,
     });
 
-    // 2. For each group: check needsIngestion() → ingest if needed
-    if (chromaReady) {
-      for (const group of this.config.groups) {
+    // 2. For each group: check needsIngestion() → ingest if needed (in parallel)
+    const pipeline = this.ragPipeline;
+    if (chromaReady && pipeline) {
+      this.logger.info(
+        { groupCount: this.config.groups.length },
+        "Starting parallel ingestion check for all groups",
+      );
+
+      const ingestionPromises = this.config.groups.map(async (group) => {
         try {
-          const needs = await this.ragPipeline.needsIngestion(group);
+          const needs = await pipeline.needsIngestion(group);
           if (needs) {
             this.logger.info(
               { groupId: group.group_id, groupName: group.group_name },
               "Ingesting documents for group",
             );
-            const result = await this.ragPipeline.ingest(group);
+            const result = await pipeline.ingest(group);
             this.logger.info(
               {
                 groupId: group.group_id,
@@ -153,7 +159,9 @@ export class LifecycleManager {
             "Ingestion failed for group",
           );
         }
-      }
+      });
+
+      await Promise.all(ingestionPromises);
     } else {
       this.logger.warn("ChromaDB not ready — skipping ingestion for all groups");
       for (const group of this.config.groups) {

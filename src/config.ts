@@ -38,7 +38,7 @@ const EmbeddingSchema = z.object({
   api_key: z.string().min(1),
   base_url: z.string().url().optional(),
   dimensions: z.number().int().default(1024),
-  batch_size: z.number().int().min(1).max(2048).default(10),
+  batch_size: z.number().int().min(1).max(2048).default(100),
   requests_per_minute: z.number().int().min(1).default(3000),
 });
 
