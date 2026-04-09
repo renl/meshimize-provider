@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import pino from "pino";
 import type { GroupConfig } from "../src/config.js";
 
@@ -481,6 +482,71 @@ describe("rag-pipeline", () => {
 
     const needs = await pipeline.needsIngestion(group);
     expect(needs).toBe(true);
+  });
+
+  // ─── source_fingerprint ───
+
+  it("should return false from needsIngestion when source_fingerprint matches current docs", async () => {
+    // Create docs in tempDir so the fingerprint is deterministic
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
+    // Compute the expected fingerprint (mirrors computeSourceFingerprint logic)
+    const stat = statSync(join(tempDir, "doc.md"));
+    const entries = [`doc.md:${stat.size}:${stat.mtimeMs}`];
+    entries.sort();
+    const expectedFingerprint = createHash("sha256").update(entries.join("\n")).digest("hex");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: expectedFingerprint,
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
+  });
+
+  it("should return true from needsIngestion when source_fingerprint differs from current docs", async () => {
+    // Create docs in tempDir
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: "stale-fingerprint-that-does-not-match",
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(true);
+  });
+
+  it("should skip fingerprint check when source_fingerprint is absent from metadata (backward compat)", async () => {
+    // Pre-existing collection without source_fingerprint should not trigger re-ingestion
+    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: new Date().toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      // source_fingerprint intentionally omitted — pre-existing collection
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
   });
 
   // ─── Empty directory ───

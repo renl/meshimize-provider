@@ -115,7 +115,8 @@ function walkDirectory(dir: string, basePath: string): LoadedDocument[] {
 }
 
 /**
- * Recursively collect file entries as "relative_path:size" strings.
+ * Recursively collect file entries as "relative_path:size:mtime_ms" strings.
+ * Including mtime ensures content-only changes (same byte count) are detected.
  */
 function collectFileEntries(dir: string, basePath: string, entries: string[]): void {
   if (!existsSync(dir)) return;
@@ -128,14 +129,15 @@ function collectFileEntries(dir: string, basePath: string, entries: string[]): v
       collectFileEntries(fullPath, basePath, entries);
     } else if (stat.isFile() && isIncludedFile(entry)) {
       const relPath = relative(basePath, fullPath);
-      entries.push(`${relPath}:${stat.size}`);
+      entries.push(`${relPath}:${stat.size}:${stat.mtimeMs}`);
     }
   }
 }
 
 /**
  * Compute a deterministic fingerprint of source files for change detection.
- * Uses sorted (relative_path, file_size) tuples hashed with SHA-256.
+ * Uses sorted (relative_path, file_size, mtime_ms) tuples hashed with SHA-256.
+ * Including mtime ensures content-only changes (same byte count) are detected.
  */
 function computeSourceFingerprint(docsPath: string): string {
   const entries: string[] = [];

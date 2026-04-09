@@ -90,7 +90,7 @@ Configuration is loaded from `config/meshimize-provider.yaml`. Environment varia
 | `EMBEDDING_API_KEY`        | Yes      | —                   | API key for the embedding provider                           |
 | `EMBEDDING_MODEL`          | No       | `text-embedding-v4` | Embedding model name                                         |
 | `EMBEDDING_BASE_URL`       | No       | —                   | Custom base URL for OpenAI-compatible embedding APIs         |
-| `EMBEDDING_BATCH_SIZE`     | No       | `10`                | Number of texts per embedding API call                       |
+| `EMBEDDING_BATCH_SIZE`     | No       | `100`               | Number of texts per embedding API call                       |
 | `GROUP_ID`                 | No       | —                   | Override `group_id` for the first configured group           |
 | `GROUP_NAME`               | No       | —                   | Override `group_name` for the first configured group         |
 | `LOG_LEVEL`                | No       | `info`              | Log level: `debug`, `info`, `warn`, `error`                  |
@@ -123,7 +123,7 @@ embedding:
   api_key: "YOUR_EMBEDDING_API_KEY"
   # base_url: "https://custom-api.example.com/v1"
   dimensions: 1024
-  batch_size: 10
+  batch_size: 100
   requests_per_minute: 3000
 
 vector_store:
