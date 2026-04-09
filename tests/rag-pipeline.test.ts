@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -488,11 +488,13 @@ describe("rag-pipeline", () => {
 
   it("should return false from needsIngestion when source_fingerprint matches current docs", async () => {
     // Create docs in tempDir so the fingerprint is deterministic
-    writeFileSync(join(tempDir, "doc.md"), "# Test doc\nContent here.");
+    const docContent = "# Test doc\nContent here.";
+    writeFileSync(join(tempDir, "doc.md"), docContent);
 
     // Compute the expected fingerprint (mirrors computeSourceFingerprint logic)
-    const stat = statSync(join(tempDir, "doc.md"));
-    const entries = [`doc.md:${stat.size}:${stat.mtimeMs}`];
+    // Uses content hash (SHA-256 of file bytes) rather than mtime for deploy stability
+    const fileHash = createHash("sha256").update(Buffer.from(docContent)).digest("hex");
+    const entries = [`doc.md:${fileHash}`];
     entries.sort();
     const expectedFingerprint = createHash("sha256").update(entries.join("\n")).digest("hex");
 
@@ -528,6 +530,36 @@ describe("rag-pipeline", () => {
 
     const needs = await pipeline.needsIngestion(group);
     expect(needs).toBe(true);
+  });
+
+  it("should return false from needsIngestion when fingerprint matches even if past stale window", async () => {
+    // Fingerprint match is authoritative — even if ingested_at is past staleDays,
+    // if the source files haven't changed, re-ingestion is unnecessary.
+    const docContent = "# Test doc\nContent here.";
+    writeFileSync(join(tempDir, "doc.md"), docContent);
+
+    const fileHash = createHash("sha256").update(Buffer.from(docContent)).digest("hex");
+    const entries = [`doc.md:${fileHash}`];
+    entries.sort();
+    const expectedFingerprint = createHash("sha256").update(entries.join("\n")).digest("hex");
+
+    // Set ingested_at to 30 days ago (well past the default 7-day stale window)
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 30);
+
+    mockListCollections.mockResolvedValue(["meshimize_fly-docs"]);
+    mockCount.mockResolvedValue(100);
+    mockCollection.metadata = {
+      ingested_at: oldDate.toISOString(),
+      group_id: "550e8400-e29b-41d4-a716-446655440000",
+      source_fingerprint: expectedFingerprint,
+    };
+
+    const pipeline = new RagPipeline(createTestOptions());
+    const group = createTestGroup(tempDir);
+
+    const needs = await pipeline.needsIngestion(group);
+    expect(needs).toBe(false);
   });
 
   it("should skip fingerprint check when source_fingerprint is absent from metadata (backward compat)", async () => {

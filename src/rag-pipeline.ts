@@ -115,36 +115,87 @@ function walkDirectory(dir: string, basePath: string): LoadedDocument[] {
 }
 
 /**
- * Recursively collect file entries as "relative_path:size:mtime_ms" strings.
- * Including mtime ensures content-only changes (same byte count) are detected.
+ * Recursively collect file entries as "relative_path:content_hash" strings.
+ * Uses SHA-256 of file content (not mtime) so the fingerprint is stable across
+ * deploys, volume remounts, and file copies that preserve content but change mtime.
+ * Returns false when a transient filesystem error prevents full traversal, so
+ * callers can treat the result as unreliable and skip fingerprint-based decisions.
  */
-function collectFileEntries(dir: string, basePath: string, entries: string[]): void {
-  if (!existsSync(dir)) return;
-  const dirEntries = readdirSync(dir);
+function collectFileEntries(dir: string, basePath: string, entries: string[]): boolean {
+  if (!existsSync(dir)) return true;
+
+  let dirEntries: string[];
+  try {
+    dirEntries = readdirSync(dir);
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "ENOENT"
+    ) {
+      return true; // directory vanished between existsSync and readdirSync
+    }
+    return false; // unrecoverable — signal caller to skip fingerprint
+  }
+
   for (const entry of dirEntries) {
     const fullPath = join(dir, entry);
-    const stat = statSync(fullPath);
+
+    let stat;
+    try {
+      stat = statSync(fullPath);
+    } catch (error: unknown) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code: string }).code === "ENOENT"
+      ) {
+        continue; // file vanished between readdir and stat — skip it
+      }
+      return false; // unrecoverable — signal caller to skip fingerprint
+    }
+
     if (stat.isDirectory()) {
       if (SKIP_DIRS.has(entry)) continue;
-      collectFileEntries(fullPath, basePath, entries);
+      if (!collectFileEntries(fullPath, basePath, entries)) return false;
     } else if (stat.isFile() && isIncludedFile(entry)) {
       const relPath = relative(basePath, fullPath);
-      entries.push(`${relPath}:${stat.size}:${stat.mtimeMs}`);
+      let fileHash: string;
+      try {
+        const content = readFileSync(fullPath);
+        fileHash = createHash("sha256").update(content).digest("hex");
+      } catch (error: unknown) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          (error as { code: string }).code === "ENOENT"
+        ) {
+          continue;
+        }
+        return false;
+      }
+      entries.push(`${relPath}:${fileHash}`);
     }
   }
+
+  return true;
 }
 
 /**
  * Compute a deterministic fingerprint of source files for change detection.
- * Uses sorted (relative_path, file_size, mtime_ms) tuples hashed with SHA-256.
- * Including mtime ensures content-only changes (same byte count) are detected.
- * Returns null when the directory does not exist or contains no matching files,
- * so callers can distinguish "no files" from "files present with hash X".
+ * Uses sorted (relative_path, content_hash) tuples hashed with SHA-256.
+ * Content hashing (rather than mtime) ensures the fingerprint is stable across
+ * deploys/copies that don't change file contents.
+ * Returns null when the directory does not exist, contains no matching files,
+ * or cannot be fully traversed due to a filesystem error.
  */
 function computeSourceFingerprint(docsPath: string): string | null {
   if (!existsSync(docsPath)) return null;
   const entries: string[] = [];
-  collectFileEntries(docsPath, docsPath, entries);
+  if (!collectFileEntries(docsPath, docsPath, entries)) return null;
   if (entries.length === 0) return null;
   entries.sort();
   return createHash("sha256").update(entries.join("\n")).digest("hex");
@@ -426,6 +477,14 @@ export class RagPipeline {
   /**
    * Check if corpus exists and is fresh enough (< staleDays old).
    * Returns true if re-ingestion is needed.
+   *
+   * Decision order:
+   * 1. Missing collection or empty → needs ingestion
+   * 2. Missing/invalid ingested_at or group_id mismatch → needs ingestion
+   * 3. Source fingerprint (if stored): matching fingerprint means corpus is current
+   *    even if ingested_at is past the staleness window — fingerprint is authoritative
+   *    because it proves the source files have not changed.
+   * 4. Staleness fallback (no fingerprint stored): rely on ingested_at age.
    */
   async needsIngestion(group: GroupConfig): Promise<boolean> {
     const collectionName = this.getCollectionName(group);
@@ -452,20 +511,12 @@ export class RagPipeline {
         return true;
       }
 
-      // Check staleness via collection metadata
-      if (collection.metadata?.ingested_at) {
-        const ingestedAt = new Date(collection.metadata.ingested_at as string);
-        if (isNaN(ingestedAt.getTime())) {
-          return true;
-        }
-        const staleDays = this.options.staleDays;
-        const now = new Date();
-        const diffDays = (now.getTime() - ingestedAt.getTime()) / (1000 * 60 * 60 * 24);
-        if (diffDays >= staleDays) {
-          return true;
-        }
-      } else {
-        // No ingested_at metadata — needs ingestion
+      // Require valid ingested_at metadata
+      if (!collection.metadata?.ingested_at) {
+        return true;
+      }
+      const ingestedAt = new Date(collection.metadata.ingested_at as string);
+      if (isNaN(ingestedAt.getTime())) {
         return true;
       }
 
@@ -474,27 +525,42 @@ export class RagPipeline {
         return true;
       }
 
-      // Check if source files have changed since last ingestion.
-      // Guard: only compare fingerprints when docs_path exists and contains files.
-      // A missing/unmounted docs_path or empty directory must NOT trigger fingerprint-based
-      // re-ingestion, because ingest() would delete the existing collection and leave the
-      // group with no data.
+      // Fingerprint check — authoritative when available.
+      // If the stored fingerprint matches the current source files, the corpus is
+      // up-to-date regardless of how old ingested_at is. This prevents unnecessary
+      // re-ingestion when docs haven't changed but the stale window has elapsed.
+      // Guard: only compare when docs_path exists and contains files. A missing/
+      // unmounted docs_path must NOT trigger re-ingestion (data-loss prevention).
       if (collection.metadata?.source_fingerprint) {
         const currentFingerprint = computeSourceFingerprint(group.docs_path);
         if (currentFingerprint === null) {
-          // docs_path missing or contains no matching files — skip fingerprint comparison
-          // to prevent data loss from transient filesystem issues
+          // docs_path missing, empty, or unreadable — skip fingerprint comparison
+          // to prevent data loss from transient filesystem issues.
+          // Fall through to staleness check.
           this.options.logger.warn(
             { groupId: group.group_id, groupName: group.group_name },
             "docs_path missing or empty — skipping fingerprint-based re-ingestion to protect existing data",
           );
-        } else if (currentFingerprint !== collection.metadata.source_fingerprint) {
+        } else if (currentFingerprint === collection.metadata.source_fingerprint) {
+          // Fingerprint matches — corpus is current, no re-ingestion needed
+          return false;
+        } else {
+          // Fingerprint differs — source files changed
           this.options.logger.info(
             { groupId: group.group_id, groupName: group.group_name },
             "Source files changed — re-ingestion needed",
           );
           return true;
         }
+      }
+
+      // Staleness fallback (no stored fingerprint, or docs_path was unreadable).
+      // Use ingested_at age as a best-effort freshness signal.
+      const staleDays = this.options.staleDays;
+      const now = new Date();
+      const diffDays = (now.getTime() - ingestedAt.getTime()) / (1000 * 60 * 60 * 24);
+      if (diffDays >= staleDays) {
+        return true;
       }
 
       return false;
